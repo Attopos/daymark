@@ -9,7 +9,6 @@ struct CalendarView: View {
 
     private let photoStore = PhotoStore()
     @State private var selectedItem: PhotosPickerItem?
-    @State private var errorTitle = "Photo Import Failed"
     @State private var errorMessage: String?
     @State private var showingLoginMessage = false
 
@@ -29,18 +28,19 @@ struct CalendarView: View {
             }
             .navigationTitle("Daymark")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: PhotoEntry.self) { entry in
+                PhotoDetailView(entry: entry)
+            }
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
+                ToolbarItem(placement: .topBarLeading) {
+                    SignInAvatarButton {
                         showingLoginMessage = true
-                    } label: {
-                        Image(systemName: "person.crop.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
                 }
             }
+        }
+        .task {
+            await photoStore.backfillLocationDetails(for: entries, in: modelContext)
         }
         .onChange(of: selectedItem) { _, newItem in
             guard let newItem else { return }
@@ -48,22 +48,20 @@ struct CalendarView: View {
             Task {
                 do {
                     guard let data = try await newItem.loadTransferable(type: Data.self) else {
-                        errorTitle = "Photo Import Failed"
                         errorMessage = "Could not import that photo."
                         selectedItem = nil
                         return
                     }
 
-                    try photoStore.savePhotoData(data, for: Date(), in: modelContext)
+                    try await photoStore.savePhotoData(data, for: Date(), in: modelContext)
                 } catch {
-                    errorTitle = "Photo Import Failed"
                     errorMessage = "Could not import that photo."
                 }
 
                 selectedItem = nil
             }
         }
-        .alert(errorTitle, isPresented: errorAlertBinding) {
+        .alert("Photo Import Failed", isPresented: errorAlertBinding) {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage ?? "Could not import that photo.")
@@ -82,7 +80,10 @@ struct CalendarView: View {
             }
 
             ForEach(entries) { entry in
-                photoTile(for: entry, size: metrics.cellSize)
+                NavigationLink(value: entry) {
+                    photoTile(for: entry, size: metrics.cellSize)
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -130,9 +131,10 @@ struct CalendarView: View {
 
     private func photoTile(for entry: PhotoEntry, size: CGFloat) -> some View {
         MarkCard(
-            image: photoStore.image(for: entry),
+            image: photoStore.thumbnail(for: entry),
             dayText: dayLabel(for: entry.day),
             subtitleText: monthLabel(for: entry.day),
+            flagEmoji: entry.flagEmoji,
             size: size
         )
     }
@@ -192,10 +194,11 @@ private struct MarkCard: View {
     let image: UIImage?
     let dayText: String
     let subtitleText: String
+    let flagEmoji: String?
     let size: CGFloat
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack {
             Group {
                 if let image {
                     Image(uiImage: image)
@@ -223,8 +226,8 @@ private struct MarkCard: View {
             )
             .frame(width: size, height: size)
 
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .top, spacing: 8) {
+            VStack(spacing: 0) {
+                HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(dayText)
                             .font(.system(size: 16, weight: .bold, design: .rounded))
@@ -236,6 +239,13 @@ private struct MarkCard: View {
                     }
 
                     Spacer(minLength: 0)
+
+                    if let flagEmoji {
+                        Text(flagEmoji)
+                            .font(.system(size: 14))
+                            .frame(width: 28, height: 28)
+                            .background(.white, in: Circle())
+                    }
                 }
 
                 Spacer(minLength: 0)

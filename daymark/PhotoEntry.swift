@@ -4,17 +4,38 @@ import SwiftData
 @Model
 final class PhotoEntry {
     @Attribute(.unique) var day: Date
-    var imageFilename: String
+    @Attribute(.externalStorage) var imageData: Data?
+    @Attribute(.externalStorage) var thumbnailData: Data?
+    var captureDate: Date?
+    var imageFilename: String?
     var latitude: Double?
     var longitude: Double?
     var countryCode: String?
+    var city: String?
+    var caption: String?
 
-    init(day: Date, imageFilename: String, latitude: Double? = nil, longitude: Double? = nil, countryCode: String? = nil) {
+    init(
+        day: Date,
+        imageData: Data? = nil,
+        thumbnailData: Data? = nil,
+        captureDate: Date? = nil,
+        imageFilename: String? = nil,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        countryCode: String? = nil,
+        city: String? = nil,
+        caption: String? = nil
+    ) {
         self.day = day
+        self.imageData = imageData
+        self.thumbnailData = thumbnailData
+        self.captureDate = captureDate
         self.imageFilename = imageFilename
         self.latitude = latitude
         self.longitude = longitude
         self.countryCode = countryCode
+        self.city = city
+        self.caption = caption
     }
 
     var flagEmoji: String? {

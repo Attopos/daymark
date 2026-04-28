@@ -6,6 +6,7 @@ struct MapView: View {
     @Query(sort: \PhotoEntry.day, order: .reverse) private var entries: [PhotoEntry]
     @Namespace private var mapScope
     private let photoStore = PhotoStore()
+    @State private var showingLoginMessage = false
     @State private var position: MapCameraPosition = .userLocation(
         followsHeading: false,
         fallback: .region(
@@ -22,7 +23,7 @@ struct MapView: View {
 
                 ForEach(locatedEntries) { entry in
                     Annotation(daymarkTitle(for: entry), coordinate: coordinate(for: entry), anchor: .bottom) {
-                        PhotoMapAnnotation(image: photoStore.image(for: entry))
+                        PhotoMapAnnotation(image: photoStore.thumbnail(for: entry))
                     }
                 }
             }
@@ -35,11 +36,23 @@ struct MapView: View {
             .mapScope(mapScope)
             .navigationTitle("Maps")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    SignInAvatarButton {
+                        showingLoginMessage = true
+                    }
+                }
+            }
             .onAppear {
                 focusMapIfNeeded()
             }
             .onChange(of: locatedEntries.count) { _, _ in
                 focusMapIfNeeded()
+            }
+            .alert("Log In", isPresented: $showingLoginMessage) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Login flow is not connected yet.")
             }
         }
     }
