@@ -7,11 +7,22 @@ final class PhotoEntry {
     var imageFilename: String
     var latitude: Double?
     var longitude: Double?
+    var countryCode: String?
 
-    init(day: Date, imageFilename: String, latitude: Double? = nil, longitude: Double? = nil) {
+    init(day: Date, imageFilename: String, latitude: Double? = nil, longitude: Double? = nil, countryCode: String? = nil) {
         self.day = day
         self.imageFilename = imageFilename
         self.latitude = latitude
         self.longitude = longitude
+        self.countryCode = countryCode
+    }
+
+    var flagEmoji: String? {
+        guard let countryCode, countryCode.count == 2 else { return nil }
+        let scalars = countryCode.uppercased().unicodeScalars.compactMap {
+            UnicodeScalar(127397 + $0.value)
+        }
+        guard scalars.count == 2 else { return nil }
+        return String(scalars.map { Character($0) })
     }
 }
