@@ -1,61 +1,52 @@
-//
-//  ContentView.swift
-//  daymark
-//
-//  Created by AC. on 4/26/26.
-//
-
 import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @State private var selectedTab: Tab = .calendar
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
+        TabView(selection: $selectedTab) {
+            CalendarView()
+                .tabItem {
+                    Label("Calendar", systemImage: "calendar")
                 }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
+                .tag(Tab.calendar)
+
+            PlaceholderView(title: "Maps")
+                .tabItem {
+                    Label("Maps", systemImage: "map")
                 }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
+                .tag(Tab.maps)
+
+            PlaceholderView(title: "Settings")
+                .tabItem {
+                    Label("Settings", systemImage: "gearshape")
                 }
-            }
-        } detail: {
-            Text("Select an item")
+                .tag(Tab.settings)
         }
     }
+}
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
+private enum Tab {
+    case calendar
+    case maps
+    case settings
+}
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
+private struct PlaceholderView: View {
+    let title: String
+
+    var body: some View {
+        NavigationStack {
+            Color(.systemBackground)
+                .ignoresSafeArea()
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .modelContainer(for: PhotoEntry.self, inMemory: true)
 }

@@ -1,18 +1,11 @@
-//
-//  daymarkApp.swift
-//  daymark
-//
-//  Created by AC. on 4/26/26.
-//
-
 import SwiftUI
 import SwiftData
 
 @main
-struct daymarkApp: App {
+struct DaymarkApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            PhotoEntry.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
