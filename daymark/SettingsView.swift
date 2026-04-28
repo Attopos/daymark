@@ -14,7 +14,6 @@ struct SettingsView: View {
     @AppStorage("reminderHour") private var reminderHour = 20
     @AppStorage("reminderMinute") private var reminderMinute = 0
 
-    @State private var showingLoginMessage = false
     @State private var showingExporter = false
     @State private var showingImporter = false
     @State private var exportItem: DaymarkBackupExportItem?
@@ -36,15 +35,8 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    SignInAvatarButton {
-                        showingLoginMessage = true
-                    }
+                    SignInAvatarButton()
                 }
-            }
-            .alert("Log In", isPresented: $showingLoginMessage) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text("Login flow is not connected yet.")
             }
             .alert("Backup Error", isPresented: errorAlertBinding) {
                 Button("OK", role: .cancel) { }

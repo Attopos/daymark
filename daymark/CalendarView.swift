@@ -10,7 +10,6 @@ struct CalendarView: View {
     private let photoStore = PhotoStore()
     @State private var selectedItem: PhotosPickerItem?
     @State private var errorMessage: String?
-    @State private var showingLoginMessage = false
 
     private let calendar = Calendar.current
 
@@ -33,9 +32,7 @@ struct CalendarView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    SignInAvatarButton {
-                        showingLoginMessage = true
-                    }
+                    SignInAvatarButton()
                 }
             }
         }
@@ -65,11 +62,6 @@ struct CalendarView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage ?? "Could not import that photo.")
-        }
-        .alert("Log In", isPresented: $showingLoginMessage) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("Login flow is not connected yet.")
         }
     }
 

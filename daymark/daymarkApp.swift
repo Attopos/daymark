@@ -3,6 +3,8 @@ import SwiftData
 
 @main
 struct DaymarkApp: App {
+    @State private var authManager = AuthManager()
+
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             PhotoEntry.self,
@@ -19,6 +21,10 @@ struct DaymarkApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(authManager)
+                .task {
+                    await authManager.checkCredentialState()
+                }
         }
         .modelContainer(sharedModelContainer)
     }
