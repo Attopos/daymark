@@ -1,48 +1,24 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 struct ContentView: View {
-    @State private var selectedTab: Tab = .calendar
+    @AppStorage("prefersDarkMode") private var prefersDarkMode = false
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            CalendarView()
-                .tabItem {
-                    Label("Calendar", systemImage: "calendar")
-                }
-                .tag(Tab.calendar)
+        TabView {
+            Tab("Calendar", systemImage: "calendar") {
+                CalendarView()
+            }
 
-            PlaceholderView(title: "Maps")
-                .tabItem {
-                    Label("Maps", systemImage: "map")
-                }
-                .tag(Tab.maps)
+            Tab("Maps", systemImage: "map") {
+                MapView()
+            }
 
-            PlaceholderView(title: "Settings")
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .tag(Tab.settings)
+            Tab("Settings", systemImage: "gearshape") {
+                SettingsView(prefersDarkMode: $prefersDarkMode)
+            }
         }
-    }
-}
-
-private enum Tab {
-    case calendar
-    case maps
-    case settings
-}
-
-private struct PlaceholderView: View {
-    let title: String
-
-    var body: some View {
-        NavigationStack {
-            Color(.systemBackground)
-                .ignoresSafeArea()
-                .navigationTitle(title)
-                .navigationBarTitleDisplayMode(.inline)
-        }
+        .preferredColorScheme(prefersDarkMode ? .dark : nil)
     }
 }
 

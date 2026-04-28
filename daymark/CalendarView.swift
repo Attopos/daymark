@@ -9,33 +9,46 @@ struct CalendarView: View {
 
     private let photoStore = PhotoStore()
     @State private var selectedItem: PhotosPickerItem?
+    @State private var errorTitle = "Photo Import Failed"
     @State private var errorMessage: String?
+    @State private var showingLoginMessage = false
 
     private let calendar = Calendar.current
 
     var body: some View {
-        GeometryReader { geometry in
-            let metrics = layoutMetrics(for: geometry.size.width, safeAreaInsets: geometry.safeAreaInsets)
+        NavigationStack {
+            GeometryReader { geometry in
+                let metrics = layoutMetrics(for: geometry.size.width, safeAreaInsets: geometry.safeAreaInsets)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    header
+                ScrollView {
                     photoGrid(metrics: metrics)
+                        .padding(.horizontal, metrics.horizontalPadding)
+                        .padding(.top, metrics.topPadding)
+                        .padding(.bottom, metrics.bottomPadding)
                 }
-                .padding(.horizontal, metrics.horizontalPadding)
-                .padding(.top, metrics.topPadding)
-                .padding(.bottom, metrics.bottomPadding)
             }
-            .background(Color(.systemBackground))
+            .navigationTitle("Daymark")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingLoginMessage = true
+                    } label: {
+                        Image(systemName: "person.crop.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
         .onChange(of: selectedItem) { _, newItem in
-            guard let newItem else {
-                return
-            }
+            guard let newItem else { return }
 
             Task {
                 do {
                     guard let data = try await newItem.loadTransferable(type: Data.self) else {
+                        errorTitle = "Photo Import Failed"
                         errorMessage = "Could not import that photo."
                         selectedItem = nil
                         return
@@ -43,42 +56,33 @@ struct CalendarView: View {
 
                     try photoStore.savePhotoData(data, for: Date(), in: modelContext)
                 } catch {
+                    errorTitle = "Photo Import Failed"
                     errorMessage = "Could not import that photo."
                 }
 
                 selectedItem = nil
             }
         }
-        .alert("Photo Import Failed", isPresented: errorAlertBinding) {
+        .alert(errorTitle, isPresented: errorAlertBinding) {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage ?? "Could not import that photo.")
         }
-    }
-
-    private var header: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Text("Daymark")
-                .font(.system(size: 32, weight: .bold, design: .rounded))
-
-            Spacer(minLength: 0)
+        .alert("Log In", isPresented: $showingLoginMessage) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Login flow is not connected yet.")
         }
     }
 
     private func photoGrid(metrics: LayoutMetrics) -> some View {
         LazyVGrid(columns: columns(for: metrics), spacing: metrics.gridSpacing) {
-            if entries.isEmpty {
-                if canCreateTodayMark {
-                    addMarkTile(size: metrics.cellSize)
-                }
-            } else {
-                if canCreateTodayMark {
-                    addMarkTile(size: metrics.cellSize)
-                }
+            if canCreateTodayMark {
+                addMarkTile(size: metrics.cellSize)
+            }
 
-                ForEach(entries) { entry in
-                    photoTile(for: entry, size: metrics.cellSize)
-                }
+            ForEach(entries) { entry in
+                photoTile(for: entry, size: metrics.cellSize)
             }
         }
     }
@@ -106,13 +110,6 @@ struct CalendarView: View {
                         }
 
                         Spacer(minLength: 0)
-
-                        Text("🌍")
-                            .font(.system(size: 16))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(.white.opacity(0.92))
-                            .clipShape(Capsule())
                     }
 
                     Spacer(minLength: 0)
@@ -132,13 +129,10 @@ struct CalendarView: View {
     }
 
     private func photoTile(for entry: PhotoEntry, size: CGFloat) -> some View {
-        let image = photoStore.image(for: entry)
-
-        return MarkCard(
-            image: image,
+        MarkCard(
+            image: photoStore.image(for: entry),
             dayText: dayLabel(for: entry.day),
             subtitleText: monthLabel(for: entry.day),
-            countryFlag: "🌍",
             size: size
         )
     }
@@ -146,11 +140,7 @@ struct CalendarView: View {
     private var errorAlertBinding: Binding<Bool> {
         Binding(
             get: { errorMessage != nil },
-            set: { newValue in
-                if !newValue {
-                    errorMessage = nil
-                }
-            }
+            set: { if !$0 { errorMessage = nil } }
         )
     }
 
@@ -180,21 +170,14 @@ struct CalendarView: View {
     }
 
     private func dayLabel(for date: Date) -> String {
-        if calendar.isDateInToday(date) {
-            return "Today"
-        }
-
-        if calendar.isDateInYesterday(date) {
-            return "Yesterday"
-        }
-
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
         return date.formatted(.dateTime.day())
     }
 
     private func monthLabel(for date: Date) -> String {
         date.formatted(.dateTime.month(.abbreviated).year())
     }
-
 }
 
 private struct LayoutMetrics {
@@ -209,7 +192,6 @@ private struct MarkCard: View {
     let image: UIImage?
     let dayText: String
     let subtitleText: String
-    let countryFlag: String
     let size: CGFloat
 
     var body: some View {
@@ -254,13 +236,6 @@ private struct MarkCard: View {
                     }
 
                     Spacer(minLength: 0)
-
-                    Text(countryFlag)
-                        .font(.system(size: 16))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(.white.opacity(0.92))
-                        .clipShape(Capsule())
                 }
 
                 Spacer(minLength: 0)
@@ -274,6 +249,6 @@ private struct MarkCard: View {
 }
 
 #Preview {
-    ContentView()
+    CalendarView()
         .modelContainer(for: PhotoEntry.self, inMemory: true)
 }

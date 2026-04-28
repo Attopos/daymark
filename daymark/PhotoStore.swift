@@ -1,4 +1,6 @@
 import Foundation
+import ImageIO
+import CoreLocation
 import SwiftData
 import UIKit
 
@@ -28,9 +30,12 @@ struct PhotoStore {
 
     func savePhotoData(_ data: Data, for date: Date, in modelContext: ModelContext) throws {
         let normalizedDate = normalizedDay(for: date)
+        let location = locationCoordinate(from: data)
         let entry = try existingEntry(for: normalizedDate, in: modelContext) ?? PhotoEntry(
             day: normalizedDate,
-            imageFilename: filename(for: normalizedDate)
+            imageFilename: filename(for: normalizedDate),
+            latitude: location?.latitude,
+            longitude: location?.longitude
         )
         let filename = filename(for: normalizedDate)
         let destinationURL = photosDirectoryURL.appendingPathComponent(filename)
@@ -44,9 +49,33 @@ struct PhotoStore {
 
         entry.day = normalizedDate
         entry.imageFilename = filename
+        entry.latitude = location?.latitude
+        entry.longitude = location?.longitude
 
         try modelContext.save()
         cache.removeObject(forKey: destinationURL as NSURL)
+    }
+
+    func deleteAllEntries(in modelContext: ModelContext) throws {
+        let descriptor = FetchDescriptor<PhotoEntry>()
+        let entries = try modelContext.fetch(descriptor)
+
+        for entry in entries {
+            let url = fileURL(for: entry)
+
+            if fileManager.fileExists(atPath: url.path) {
+                try fileManager.removeItem(at: url)
+            }
+
+            cache.removeObject(forKey: url as NSURL)
+            modelContext.delete(entry)
+        }
+
+        if fileManager.fileExists(atPath: photosDirectoryURL.path) {
+            try fileManager.removeItem(at: photosDirectoryURL)
+        }
+
+        try modelContext.save()
     }
 
     private func existingEntry(for date: Date, in modelContext: ModelContext) throws -> PhotoEntry? {
@@ -73,5 +102,31 @@ struct PhotoStore {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return "\(formatter.string(from: date)).photo"
+    }
+
+    func locationCoordinate(from data: Data) -> CLLocationCoordinate2D? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let gps = properties[kCGImagePropertyGPSDictionary] as? [CFString: Any],
+              let latitude = gps[kCGImagePropertyGPSLatitude] as? Double,
+              let longitude = gps[kCGImagePropertyGPSLongitude] as? Double else {
+            return nil
+        }
+
+        let latitudeRef = gps[kCGImagePropertyGPSLatitudeRef] as? String
+        let longitudeRef = gps[kCGImagePropertyGPSLongitudeRef] as? String
+
+        return CLLocationCoordinate2D(
+            latitude: signedCoordinate(latitude, reference: latitudeRef, negativeReference: "S"),
+            longitude: signedCoordinate(longitude, reference: longitudeRef, negativeReference: "W")
+        )
+    }
+
+    private func signedCoordinate(_ value: Double, reference: String?, negativeReference: String) -> Double {
+        guard let reference else {
+            return value
+        }
+
+        return reference.caseInsensitiveCompare(negativeReference) == .orderedSame ? -abs(value) : abs(value)
     }
 }
