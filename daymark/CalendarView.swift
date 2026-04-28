@@ -182,7 +182,7 @@ private struct LayoutMetrics {
     let cellSize: CGFloat
 }
 
-private struct MarkCard: View {
+struct MarkCard: View {
     let image: UIImage?
     let dayText: String
     let subtitleText: String

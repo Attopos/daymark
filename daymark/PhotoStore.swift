@@ -46,6 +46,7 @@ struct PhotoStore {
                 latitude: entry.latitude,
                 longitude: entry.longitude,
                 countryCode: entry.countryCode,
+                countryName: entry.countryName,
                 city: entry.city,
                 caption: entry.caption
             )
@@ -77,9 +78,11 @@ struct PhotoStore {
         if let location {
             let details = await reverseGeocodeDetails(for: location)
             entry.countryCode = details.countryCode
+            entry.countryName = details.countryName
             entry.city = details.city
         } else {
             entry.countryCode = nil
+            entry.countryName = nil
             entry.city = nil
         }
 
@@ -120,6 +123,7 @@ struct PhotoStore {
             entry.latitude = backupEntry.latitude
             entry.longitude = backupEntry.longitude
             entry.countryCode = backupEntry.countryCode
+            entry.countryName = backupEntry.countryName
             entry.city = backupEntry.city
             entry.caption = backupEntry.caption
 
@@ -132,13 +136,14 @@ struct PhotoStore {
     func backfillLocationDetails(for entries: [PhotoEntry], in modelContext: ModelContext) async {
         var didUpdate = false
         for entry in entries {
-            guard (entry.countryCode == nil || entry.city == nil),
+            guard (entry.countryCode == nil || entry.countryName == nil || entry.city == nil),
                   let lat = entry.latitude,
                   let lon = entry.longitude else { continue }
             let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
             let details = await reverseGeocodeDetails(for: coordinate)
-            if entry.countryCode != details.countryCode || entry.city != details.city {
+            if entry.countryCode != details.countryCode || entry.countryName != details.countryName || entry.city != details.city {
                 entry.countryCode = details.countryCode
+                entry.countryName = details.countryName
                 entry.city = details.city
                 didUpdate = true
             }
@@ -173,9 +178,10 @@ struct PhotoStore {
                     entry.latitude = coordinate.latitude
                     entry.longitude = coordinate.longitude
 
-                    if entry.countryCode == nil || entry.city == nil {
+                    if entry.countryCode == nil || entry.countryName == nil || entry.city == nil {
                         let details = await reverseGeocodeDetails(for: coordinate)
                         entry.countryCode = entry.countryCode ?? details.countryCode
+                        entry.countryName = entry.countryName ?? details.countryName
                         entry.city = entry.city ?? details.city
                     }
                 }
@@ -305,17 +311,18 @@ struct PhotoStore {
         return CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
     }
 
-    private func reverseGeocodeDetails(for coordinate: CLLocationCoordinate2D) async -> (countryCode: String?, city: String?) {
+    private func reverseGeocodeDetails(for coordinate: CLLocationCoordinate2D) async -> (countryCode: String?, countryName: String?, city: String?) {
         let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
         guard let request = MKReverseGeocodingRequest(location: location),
               let mapItem = try? await request.mapItems.first else {
-            return (nil, nil)
+            return (nil, nil, nil)
         }
 
         let address = mapItem.addressRepresentations
         let city = address?.cityName ?? mapItem.name
         let countryCode = address?.region?.identifier.uppercased()
-        return (countryCode, city)
+        let countryName = address?.regionName
+        return (countryCode, countryName, city)
     }
 
     private func encodedBackupData(for payload: DaymarkBackupPayload) throws -> Data {
@@ -359,6 +366,7 @@ struct DaymarkBackupEntry: Codable {
     let latitude: Double?
     let longitude: Double?
     let countryCode: String?
+    let countryName: String?
     let city: String?
     let caption: String?
 }

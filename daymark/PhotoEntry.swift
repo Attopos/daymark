@@ -11,6 +11,7 @@ final class PhotoEntry {
     var latitude: Double?
     var longitude: Double?
     var countryCode: String?
+    var countryName: String?
     var city: String?
     var caption: String?
 
@@ -23,6 +24,7 @@ final class PhotoEntry {
         latitude: Double? = nil,
         longitude: Double? = nil,
         countryCode: String? = nil,
+        countryName: String? = nil,
         city: String? = nil,
         caption: String? = nil
     ) {
@@ -34,6 +36,7 @@ final class PhotoEntry {
         self.latitude = latitude
         self.longitude = longitude
         self.countryCode = countryCode
+        self.countryName = countryName
         self.city = city
         self.caption = caption
     }
