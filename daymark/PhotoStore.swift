@@ -88,7 +88,6 @@ struct PhotoStore {
 
         try modelContext.save()
         invalidateCaches(for: entry)
-        refreshTodayWidgetContent(in: modelContext)
     }
 
     func saveEditedImage(_ image: UIImage, for entry: PhotoEntry, in modelContext: ModelContext) throws {
@@ -103,14 +102,12 @@ struct PhotoStore {
 
         try modelContext.save()
         invalidateCaches(for: entry)
-        refreshTodayWidgetContent(in: modelContext)
     }
 
     func deleteEntry(_ entry: PhotoEntry, in modelContext: ModelContext) throws {
         invalidateCaches(for: entry)
         modelContext.delete(entry)
         try modelContext.save()
-        refreshTodayWidgetContent(in: modelContext)
     }
 
     func importBackup(from url: URL, into modelContext: ModelContext) throws {
@@ -148,7 +145,6 @@ struct PhotoStore {
         }
 
         try modelContext.save()
-        refreshTodayWidgetContent(in: modelContext)
     }
 
     func backfillLocationDetails(for entries: [PhotoEntry], in modelContext: ModelContext) async {
@@ -169,8 +165,6 @@ struct PhotoStore {
         if didUpdate {
             try? modelContext.save()
         }
-
-        refreshTodayWidgetContent(in: modelContext)
     }
 
     func migrateLegacyLibraryIfNeeded(in modelContext: ModelContext) async {
@@ -221,8 +215,6 @@ struct PhotoStore {
         if migratedAnyEntries && allLegacyFilesWereMigrated {
             removeLegacyPhotosDirectoryIfPossible()
         }
-
-        refreshTodayWidgetContent(in: modelContext)
     }
 
     private func existingEntry(for date: Date, in modelContext: ModelContext) throws -> PhotoEntry? {

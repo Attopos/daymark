@@ -69,11 +69,6 @@
 			path = daymarkUITests;
 			sourceTree = "<group>";
 		};
-		B1A0000E26AA000100000001 /* daymarkWidget */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = daymarkWidget;
-			sourceTree = "<group>";
-		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -104,7 +99,6 @@
 			isa = PBXGroup;
 			children = (
 				A14DCA332F9E72CC001750D5 /* daymark */,
-				B1A0000E26AA000100000001 /* daymarkWidget */,
 				A14DCA432F9E72CD001750D5 /* daymarkTests */,
 				A14DCA4D2F9E72CD001750D5 /* daymarkUITests */,
 				A14DCA322F9E72CC001750D5 /* Products */,
@@ -198,9 +192,6 @@
 				B1A0000C26AA000100000001 /* Resources */,
 			);
 			buildRules = (
-			);
-			fileSystemSynchronizedGroups = (
-				B1A0000E26AA000100000001 /* daymarkWidget */,
 			);
 			name = daymarkWidget;
 			productName = daymarkWidget;
