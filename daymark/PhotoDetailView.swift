@@ -9,23 +9,16 @@ struct PhotoDetailView: View {
 
     let entry: PhotoEntry
     private let photoStore = PhotoStore()
-
-    @State private var caption: String
     @State private var selectedItem: PhotosPickerItem?
     @State private var showingDeleteConfirmation = false
+    @State private var showingPhotoEditor = false
     @State private var errorMessage: String?
-
-    init(entry: PhotoEntry) {
-        self.entry = entry
-        _caption = State(initialValue: entry.caption ?? "")
-    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 photoSection
                 metadataSection
-                captionSection
                 deleteSection
             }
             .padding(.horizontal, 16)
@@ -36,9 +29,20 @@ struct PhotoDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                PhotosPicker(selection: $selectedItem, matching: .images) {
-                    Image(systemName: "arrow.triangle.2.circlepath.camera")
-                        .font(.system(size: 15, weight: .semibold))
+                HStack(spacing: 16) {
+                    if photoStore.image(for: entry) != nil {
+                        Button {
+                            showingPhotoEditor = true
+                        } label: {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                    }
+
+                    PhotosPicker(selection: $selectedItem, matching: .images) {
+                        Image(systemName: "arrow.triangle.2.circlepath.camera")
+                            .font(.system(size: 15, weight: .semibold))
+                    }
                 }
             }
         }
@@ -58,10 +62,6 @@ struct PhotoDetailView: View {
                 selectedItem = nil
             }
         }
-        .onChange(of: caption) { _, newValue in
-            entry.caption = newValue.isEmpty ? nil : newValue
-            try? modelContext.save()
-        }
         .confirmationDialog("Delete this entry?", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 do {
@@ -78,6 +78,17 @@ struct PhotoDetailView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage ?? "Something went wrong.")
+        }
+        .sheet(isPresented: $showingPhotoEditor) {
+            if let image = photoStore.image(for: entry) {
+                PhotoEditView(image: image) { editedImage in
+                    do {
+                        try photoStore.saveEditedImage(editedImage, for: entry, in: modelContext)
+                    } catch {
+                        errorMessage = "Could not save photo edits."
+                    }
+                }
+            }
         }
     }
 
@@ -125,21 +136,6 @@ struct PhotoDetailView: View {
                     value: formatCoordinates(lat: entry.latitude!, lon: entry.longitude!)
                 )
             }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private var captionSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Note", systemImage: "text.quote")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            TextField("Add a note about this day...", text: $caption, axis: .vertical)
-                .lineLimit(1...6)
-                .textFieldStyle(.plain)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

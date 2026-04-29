@@ -6,6 +6,10 @@
 	objectVersion = 100;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		B1A0001126AA000100000001 /* daymarkWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = B1A0001026AA000100000001 /* daymarkWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		A14DCA412F9E72CD001750D5 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -21,12 +25,32 @@
 			remoteGlobalIDString = A14DCA302F9E72CC001750D5;
 			remoteInfo = daymark;
 		};
+		B1A0001326AA000100000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A14DCA292F9E72CC001750D5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B1A0000F26AA000100000001;
+			remoteInfo = daymarkWidget;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		B1A0001226AA000100000001 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = "";
+			dstSubfolder = PlugIns;
+			files = (
+				B1A0001126AA000100000001 /* daymarkWidget.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		A14DCA312F9E72CC001750D5 /* daymark.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = daymark.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A14DCA402F9E72CD001750D5 /* daymarkTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = daymarkTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A14DCA4A2F9E72CD001750D5 /* daymarkUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = daymarkUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B1A0001026AA000100000001 /* daymarkWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = daymarkWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -43,6 +67,11 @@
 		A14DCA4D2F9E72CD001750D5 /* daymarkUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = daymarkUITests;
+			sourceTree = "<group>";
+		};
+		B1A0000E26AA000100000001 /* daymarkWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = daymarkWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -63,6 +92,11 @@
 			files = (
 			);
 		};
+		B1A0000B26AA000100000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -70,6 +104,7 @@
 			isa = PBXGroup;
 			children = (
 				A14DCA332F9E72CC001750D5 /* daymark */,
+				B1A0000E26AA000100000001 /* daymarkWidget */,
 				A14DCA432F9E72CD001750D5 /* daymarkTests */,
 				A14DCA4D2F9E72CD001750D5 /* daymarkUITests */,
 				A14DCA322F9E72CC001750D5 /* Products */,
@@ -80,6 +115,7 @@
 			isa = PBXGroup;
 			children = (
 				A14DCA312F9E72CC001750D5 /* daymark.app */,
+				B1A0001026AA000100000001 /* daymarkWidget.appex */,
 				A14DCA402F9E72CD001750D5 /* daymarkTests.xctest */,
 				A14DCA4A2F9E72CD001750D5 /* daymarkUITests.xctest */,
 			);
@@ -96,8 +132,12 @@
 				A14DCA2D2F9E72CC001750D5 /* Sources */,
 				A14DCA2E2F9E72CC001750D5 /* Frameworks */,
 				A14DCA2F2F9E72CC001750D5 /* Resources */,
+				B1A0001226AA000100000001 /* Embed App Extensions */,
 			);
 			buildRules = (
+			);
+			dependencies = (
+				B1A0001426AA000100000001 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A14DCA332F9E72CC001750D5 /* daymark */,
@@ -149,6 +189,24 @@
 			productReference = A14DCA4A2F9E72CD001750D5 /* daymarkUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		B1A0000F26AA000100000001 /* daymarkWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B1A0001726AA000100000001 /* Build configuration list for PBXNativeTarget "daymarkWidget" */;
+			buildPhases = (
+				B1A0000A26AA000100000001 /* Sources */,
+				B1A0000B26AA000100000001 /* Frameworks */,
+				B1A0000C26AA000100000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			fileSystemSynchronizedGroups = (
+				B1A0000E26AA000100000001 /* daymarkWidget */,
+			);
+			name = daymarkWidget;
+			productName = daymarkWidget;
+			productReference = B1A0001026AA000100000001 /* daymarkWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -170,6 +228,9 @@
 						CreatedOnToolsVersion = 26.4.1;
 						TestTargetID = A14DCA302F9E72CC001750D5;
 					};
+					B1A0000F26AA000100000001 = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
 				};
 			};
 			buildConfigurationList = A14DCA2C2F9E72CC001750D5 /* Build configuration list for PBXProject "daymark" */;
@@ -187,6 +248,7 @@
 			projectRoot = "";
 			targets = (
 				A14DCA302F9E72CC001750D5 /* daymark */,
+				B1A0000F26AA000100000001 /* daymarkWidget */,
 				A14DCA3F2F9E72CD001750D5 /* daymarkTests */,
 				A14DCA492F9E72CD001750D5 /* daymarkUITests */,
 			);
@@ -209,6 +271,11 @@
 			files = (
 			);
 		};
+		B1A0000C26AA000100000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -227,6 +294,11 @@
 			files = (
 			);
 		};
+		B1A0000A26AA000100000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -239,6 +311,11 @@
 			isa = PBXTargetDependency;
 			target = A14DCA302F9E72CC001750D5 /* daymark */;
 			targetProxy = A14DCA4B2F9E72CD001750D5 /* PBXContainerItemProxy */;
+		};
+		B1A0001426AA000100000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B1A0000F26AA000100000001 /* daymarkWidget */;
+			targetProxy = B1A0001326AA000100000001 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -369,6 +446,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = daymark/daymark.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 9F9J47QA24;
@@ -406,6 +484,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = daymark/daymark.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 9F9J47QA24;
@@ -524,6 +603,70 @@
 			};
 			name = Release;
 		};
+		B1A0001526AA000100000001 /* Debug configuration for PBXNativeTarget "daymarkWidget" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = daymarkWidget/daymarkWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9F9J47QA24;
+				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_PROFILING_CODE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.aaroncao.daymark.daymarkWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B1A0001626AA000100000001 /* Release configuration for PBXNativeTarget "daymarkWidget" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = daymarkWidget/daymarkWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9F9J47QA24;
+				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_PROFILING_CODE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.aaroncao.daymark.daymarkWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -556,6 +699,14 @@
 			buildConfigurations = (
 				A14DCA5B2F9E72CD001750D5 /* Debug configuration for PBXNativeTarget "daymarkUITests" */,
 				A14DCA5C2F9E72CD001750D5 /* Release configuration for PBXNativeTarget "daymarkUITests" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		B1A0001726AA000100000001 /* Build configuration list for PBXNativeTarget "daymarkWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B1A0001526AA000100000001 /* Debug configuration for PBXNativeTarget "daymarkWidget" */,
+				B1A0001626AA000100000001 /* Release configuration for PBXNativeTarget "daymarkWidget" */,
 			);
 			defaultConfigurationName = Release;
 		};

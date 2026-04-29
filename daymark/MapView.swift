@@ -35,11 +35,6 @@ struct MapView: View {
             .mapScope(mapScope)
             .navigationTitle("Maps")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    SignInAvatarButton()
-                }
-            }
             .onAppear {
                 focusMapIfNeeded()
             }

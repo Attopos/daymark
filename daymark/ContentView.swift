@@ -27,6 +27,7 @@ struct ContentView: View {
         .preferredColorScheme(prefersDarkMode ? .dark : nil)
         .task {
             await photoStore.migrateLegacyLibraryIfNeeded(in: modelContext)
+            photoStore.refreshTodayWidgetContent(in: modelContext)
         }
     }
 }

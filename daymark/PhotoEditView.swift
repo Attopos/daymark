@@ -11,8 +11,12 @@ struct PhotoEditView: View {
     @State private var imageBounds: CGRect = .zero
     @State private var initialized = false
 
+    private var baseImage: UIImage {
+        image.normalizedImage()
+    }
+
     private var displayImage: UIImage {
-        rotationSteps % 4 == 0 ? image : image.rotatedByQuarterTurns(rotationSteps)
+        rotationSteps % 4 == 0 ? baseImage : baseImage.rotatedByQuarterTurns(rotationSteps)
     }
 
     var body: some View {
@@ -38,15 +42,13 @@ struct PhotoEditView: View {
                         CropOverlay(cropRect: $cropRect, imageBounds: bounds)
                     }
                     .onAppear {
-                        if !initialized {
-                            imageBounds = bounds
-                            cropRect = bounds
-                            initialized = true
-                        }
+                        syncCropBounds(to: bounds, forceReset: !initialized)
                     }
-                    .onChange(of: rotationSteps) {
-                        imageBounds = bounds
-                        cropRect = bounds
+                    .onChange(of: rotationSteps) { _, _ in
+                        syncCropBounds(to: bounds, forceReset: true)
+                    }
+                    .onChange(of: bounds) { _, newBounds in
+                        syncCropBounds(to: newBounds, forceReset: !initialized)
                     }
                 }
 
@@ -97,6 +99,22 @@ struct PhotoEditView: View {
         .padding(.vertical, 20)
         .frame(maxWidth: .infinity)
         .background(.black)
+    }
+
+    private func syncCropBounds(to bounds: CGRect, forceReset: Bool) {
+        imageBounds = bounds
+        guard bounds.width > 0, bounds.height > 0 else { return }
+
+        if forceReset || cropRect == .zero || !initialized {
+            cropRect = bounds
+            initialized = true
+            return
+        }
+
+        cropRect = cropRect.intersection(bounds)
+        if cropRect.isNull || cropRect.width < 50 || cropRect.height < 50 {
+            cropRect = bounds
+        }
     }
 
     private func aspectFitSize(_ imageSize: CGSize, in containerSize: CGSize) -> CGSize {
@@ -270,6 +288,18 @@ private struct CropMaskShape: Shape {
 // MARK: - UIImage Rotation
 
 extension UIImage {
+    func normalizedImage() -> UIImage {
+        guard imageOrientation != .up else { return self }
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        format.opaque = false
+
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+
     func rotatedByQuarterTurns(_ turns: Int) -> UIImage {
         let normalizedTurns = ((turns % 4) + 4) % 4
         guard normalizedTurns != 0, cgImage != nil else { return self }
