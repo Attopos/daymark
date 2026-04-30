@@ -39,12 +39,14 @@ struct PhotoStore {
     func makeBackupExportItem(from entries: [PhotoEntry]) throws -> DaymarkBackupExportItem {
         let backupEntries = entries.map { entry in
             DaymarkBackupEntry(
+                id: entry.id,
                 day: entry.day,
                 captureDate: entry.captureDate,
                 imageData: entry.imageData,
                 thumbnailData: entry.thumbnailData,
                 latitude: entry.latitude,
                 longitude: entry.longitude,
+                timezone: entry.timezone,
                 countryCode: entry.countryCode,
                 countryName: entry.countryName,
                 city: entry.city,
@@ -79,6 +81,7 @@ struct PhotoStore {
         entry.imageFilename = nil
         entry.latitude = location?.latitude
         entry.longitude = location?.longitude
+        entry.timezone = TimeZone.current.identifier
 
         if let location {
             let details = await reverseGeocodeDetails(for: location)
@@ -134,6 +137,9 @@ struct PhotoStore {
                 modelContext.insert(entry)
             }
 
+            if let backupID = backupEntry.id {
+                entry.id = backupID
+            }
             entry.day = normalizedDate
             entry.captureDate = backupEntry.captureDate
             entry.imageData = backupEntry.imageData
@@ -141,6 +147,7 @@ struct PhotoStore {
             entry.imageFilename = nil
             entry.latitude = backupEntry.latitude
             entry.longitude = backupEntry.longitude
+            entry.timezone = backupEntry.timezone ?? entry.timezone
             entry.countryCode = backupEntry.countryCode
             entry.countryName = backupEntry.countryName
             entry.city = backupEntry.city
@@ -150,6 +157,26 @@ struct PhotoStore {
         }
 
         try modelContext.save()
+    }
+
+    func backfillMetadata(for entries: [PhotoEntry], in modelContext: ModelContext) {
+        var seenIDs = Set<String>()
+        var didUpdate = false
+        for entry in entries {
+            if entry.id.isEmpty || seenIDs.contains(entry.id) {
+                entry.id = UUID().uuidString
+                didUpdate = true
+            }
+            seenIDs.insert(entry.id)
+
+            if entry.timezone == nil {
+                entry.timezone = TimeZone.current.identifier
+                didUpdate = true
+            }
+        }
+        if didUpdate {
+            try? modelContext.save()
+        }
     }
 
     func backfillLocationDetails(for entries: [PhotoEntry], in modelContext: ModelContext) async {
@@ -438,12 +465,14 @@ private final class CurrentLocationProvider: NSObject, CLLocationManagerDelegate
 }
 
 struct DaymarkBackupEntry: Codable {
+    let id: String?
     let day: Date
     let captureDate: Date?
     let imageData: Data?
     let thumbnailData: Data?
     let latitude: Double?
     let longitude: Double?
+    let timezone: String?
     let countryCode: String?
     let countryName: String?
     let city: String?

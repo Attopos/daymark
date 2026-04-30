@@ -3,6 +3,7 @@ import SwiftData
 
 @Model
 final class PhotoEntry {
+    var id: String = UUID().uuidString
     @Attribute(.unique) var day: Date
     @Attribute(.externalStorage) var imageData: Data?
     @Attribute(.externalStorage) var thumbnailData: Data?
@@ -10,12 +11,14 @@ final class PhotoEntry {
     var imageFilename: String?
     var latitude: Double?
     var longitude: Double?
+    var timezone: String?
     var countryCode: String?
     var countryName: String?
     var city: String?
     var caption: String?
 
     init(
+        id: String = UUID().uuidString,
         day: Date,
         imageData: Data? = nil,
         thumbnailData: Data? = nil,
@@ -23,11 +26,13 @@ final class PhotoEntry {
         imageFilename: String? = nil,
         latitude: Double? = nil,
         longitude: Double? = nil,
+        timezone: String? = nil,
         countryCode: String? = nil,
         countryName: String? = nil,
         city: String? = nil,
         caption: String? = nil
     ) {
+        self.id = id
         self.day = day
         self.imageData = imageData
         self.thumbnailData = thumbnailData
@@ -35,6 +40,7 @@ final class PhotoEntry {
         self.imageFilename = imageFilename
         self.latitude = latitude
         self.longitude = longitude
+        self.timezone = timezone
         self.countryCode = countryCode
         self.countryName = countryName
         self.city = city

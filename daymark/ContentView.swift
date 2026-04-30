@@ -27,6 +27,10 @@ struct ContentView: View {
         .preferredColorScheme(prefersDarkMode ? .dark : nil)
         .task {
             await photoStore.migrateLegacyLibraryIfNeeded(in: modelContext)
+            let descriptor = FetchDescriptor<PhotoEntry>()
+            if let entries = try? modelContext.fetch(descriptor) {
+                photoStore.backfillMetadata(for: entries, in: modelContext)
+            }
         }
     }
 }
