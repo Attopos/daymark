@@ -18,11 +18,13 @@ struct CalendarView: View {
             GeometryReader { geometry in
                 let metrics = layoutMetrics(for: geometry.size.width, safeAreaInsets: geometry.safeAreaInsets)
 
-                ScrollView {
-                    photoGrid(metrics: metrics)
-                        .padding(.horizontal, metrics.horizontalPadding)
-                        .padding(.top, metrics.topPadding)
-                        .padding(.bottom, metrics.bottomPadding)
+                if metrics.cellSize > 0 {
+                    ScrollView {
+                        photoGrid(metrics: metrics)
+                            .padding(.horizontal, metrics.horizontalPadding)
+                            .padding(.top, metrics.topPadding)
+                            .padding(.bottom, metrics.bottomPadding)
+                    }
                 }
             }
             .navigationTitle("Daymark")

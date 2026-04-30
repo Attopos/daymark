@@ -58,7 +58,12 @@ struct PhotoStore {
 
     func savePhotoData(_ data: Data, for date: Date, in modelContext: ModelContext) async throws {
         let normalizedDate = normalizedDay(for: date)
-        let location = locationCoordinate(from: data)
+        let embeddedLocation = locationCoordinate(from: data)
+        let location = if let embeddedLocation {
+            embeddedLocation
+        } else {
+            await CurrentLocationProvider.requestLocation()
+        }
         let captureDate = captureDate(from: data) ?? date
         let thumbnailData = try thumbnailData(from: data)
         let entry = try existingEntry(for: normalizedDate, in: modelContext) ?? PhotoEntry(day: normalizedDate)
@@ -369,6 +374,66 @@ enum PhotoStoreError: LocalizedError {
         case .invalidImageData:
             return "The selected file is not a valid image."
         }
+    }
+}
+
+@MainActor
+private final class CurrentLocationProvider: NSObject, CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+    private var continuation: CheckedContinuation<CLLocationCoordinate2D?, Never>?
+
+    static func requestLocation() async -> CLLocationCoordinate2D? {
+        let provider = CurrentLocationProvider()
+        return await provider.requestLocation()
+    }
+
+    private override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+    }
+
+    private func requestLocation() async -> CLLocationCoordinate2D? {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+
+            switch manager.authorizationStatus {
+            case .authorizedAlways, .authorizedWhenInUse:
+                manager.requestLocation()
+            case .notDetermined:
+                manager.requestWhenInUseAuthorization()
+            case .restricted, .denied:
+                finish(with: nil)
+            @unknown default:
+                finish(with: nil)
+            }
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.requestLocation()
+        case .restricted, .denied:
+            finish(with: nil)
+        case .notDetermined:
+            break
+        @unknown default:
+            finish(with: nil)
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        finish(with: locations.last?.coordinate)
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        finish(with: nil)
+    }
+
+    private func finish(with coordinate: CLLocationCoordinate2D?) {
+        continuation?.resume(returning: coordinate)
+        continuation = nil
     }
 }
 

@@ -62,17 +62,18 @@ struct PhotoDetailView: View {
                 selectedItem = nil
             }
         }
-        .confirmationDialog("Delete this entry?", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
+        .alert("Delete this photo?", isPresented: $showingDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
                 do {
                     try photoStore.deleteEntry(entry, in: modelContext)
                     dismiss()
                 } catch {
-                    errorMessage = "Could not delete entry."
+                    errorMessage = "Could not delete."
                 }
             }
         } message: {
-            Text("This photo and its data will be permanently removed.")
+            Text("This photo will be permanently removed.")
         }
         .alert("Error", isPresented: errorAlertBinding) {
             Button("OK", role: .cancel) { }
@@ -148,7 +149,7 @@ struct PhotoDetailView: View {
         } label: {
             HStack {
                 Image(systemName: "trash")
-                Text("Delete Entry")
+                Text("Delete")
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
