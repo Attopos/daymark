@@ -1,3 +1,5 @@
+import Combine
+import CoreLocation
 import MapKit
 import SwiftData
 import SwiftUI
@@ -6,6 +8,7 @@ struct MapView: View {
     @Query(sort: \PhotoEntry.day, order: .reverse) private var entries: [PhotoEntry]
     @Namespace private var mapScope
     private let photoStore = PhotoStore()
+    @StateObject private var locationManager = DaymarkLocationManager()
     @State private var position: MapCameraPosition = .userLocation(
         followsHeading: false,
         fallback: .region(
@@ -28,7 +31,12 @@ struct MapView: View {
             }
             .mapStyle(.standard(elevation: .realistic))
             .mapControls {
-                MapUserLocationButton()
+                Button {
+                    locationManager.requestCurrentLocation()
+                } label: {
+                    Image(systemName: "location.fill")
+                }
+                .accessibilityLabel("Show Current Location")
                 MapCompass()
                 MapScaleView()
             }
@@ -36,10 +44,19 @@ struct MapView: View {
             .navigationTitle("Maps")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
+                locationManager.requestAuthorizationIfNeeded()
                 focusMapIfNeeded()
             }
             .onChange(of: locatedEntries.count) { _, _ in
                 focusMapIfNeeded()
+            }
+            .onReceive(locationManager.$currentRegion.compactMap { $0 }) { region in
+                position = .region(region)
+            }
+            .alert("Location Access Needed", isPresented: locationAccessAlertBinding) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Allow location access in Settings to center the map on your current position.")
             }
         }
     }
@@ -59,6 +76,80 @@ struct MapView: View {
     private func focusMapIfNeeded() {
         guard !locatedEntries.isEmpty else { return }
         position = .automatic
+    }
+
+    private var locationAccessAlertBinding: Binding<Bool> {
+        Binding(
+            get: { locationManager.showsPermissionAlert },
+            set: { locationManager.showsPermissionAlert = $0 }
+        )
+    }
+}
+
+private final class DaymarkLocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
+    @Published var currentRegion: MKCoordinateRegion?
+    @Published var showsPermissionAlert = false
+
+    private let manager = CLLocationManager()
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyBest
+    }
+
+    func requestAuthorizationIfNeeded() {
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .restricted, .denied:
+            showsPermissionAlert = true
+        case .authorizedAlways, .authorizedWhenInUse:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    func requestCurrentLocation() {
+        switch manager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.requestLocation()
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .restricted, .denied:
+            showsPermissionAlert = true
+        @unknown default:
+            break
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            showsPermissionAlert = false
+            manager.requestLocation()
+        case .restricted, .denied:
+            showsPermissionAlert = true
+        case .notDetermined:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let coordinate = locations.last?.coordinate else { return }
+
+        currentRegion = MKCoordinateRegion(
+            center: coordinate,
+            span: MKCoordinateSpan(latitudeDelta: 0.015, longitudeDelta: 0.015)
+        )
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        guard let clError = error as? CLError, clError.code == .denied else { return }
+        showsPermissionAlert = true
     }
 }
 

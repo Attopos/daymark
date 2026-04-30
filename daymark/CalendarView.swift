@@ -151,8 +151,9 @@ struct CalendarView: View {
         let gridSpacing = 2.0
         let topPadding = 10.0
         let bottomPadding = max(safeAreaInsets.bottom + 20, 28)
-        let availableWidth = width - (horizontalPadding * 2) - (gridSpacing * 2)
-        let cellSize = floor(availableWidth / 3)
+        let safeWidth = width.isFinite ? max(width, 0) : 0
+        let availableWidth = max(safeWidth - (horizontalPadding * 2) - (gridSpacing * 2), 0)
+        let cellSize = max(floor(availableWidth / 3), 0)
 
         return LayoutMetrics(
             horizontalPadding: horizontalPadding,
