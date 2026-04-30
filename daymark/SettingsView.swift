@@ -16,7 +16,9 @@ struct SettingsView: View {
 
     @State private var showingExporter = false
     @State private var showingImporter = false
+    @State private var showingImportOptions = false
     @State private var exportItem: DaymarkBackupExportItem?
+    @State private var pendingBackup: BackupContents?
     @State private var statusMessage: String?
     @State private var errorMessage: String?
 
@@ -43,10 +45,29 @@ struct SettingsView: View {
             } message: {
                 Text(errorMessage ?? "Backup failed.")
             }
+            .confirmationDialog(
+                "Import Backup",
+                isPresented: $showingImportOptions,
+                titleVisibility: .visible
+            ) {
+                Button("Merge (keep existing photos)") {
+                    performImport(mode: .merge)
+                }
+                Button("Overwrite (replace existing photos)") {
+                    performImport(mode: .overwrite)
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingBackup = nil
+                }
+            } message: {
+                if let backup = pendingBackup {
+                    Text("Found \(backup.payload.entries.count) entries. Choose how to handle days that already have a photo.")
+                }
+            }
             .fileExporter(
                 isPresented: $showingExporter,
                 item: exportItem,
-                contentTypes: [.json],
+                contentTypes: [.zip],
                 defaultFilename: defaultBackupFilename
             ) { result in
                 switch result {
@@ -59,12 +80,12 @@ struct SettingsView: View {
             }
             .fileImporter(
                 isPresented: $showingImporter,
-                allowedContentTypes: [.json]
+                allowedContentTypes: [.zip, .json]
             ) { result in
                 do {
                     let url = try result.get()
-                    try photoStore.importBackup(from: url, into: modelContext)
-                    statusMessage = "Backup imported."
+                    pendingBackup = try photoStore.parseBackup(from: url)
+                    showingImportOptions = true
                 } catch {
                     errorMessage = error.localizedDescription
                 }
@@ -232,6 +253,17 @@ struct SettingsView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func performImport(mode: BackupImportMode) {
+        guard let backup = pendingBackup else { return }
+        do {
+            try photoStore.importBackup(from: backup, mode: mode, into: modelContext)
+            statusMessage = "Imported \(backup.payload.entries.count) entries."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        pendingBackup = nil
     }
 }
 

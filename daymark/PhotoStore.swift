@@ -7,6 +7,30 @@ import SwiftData
 import UniformTypeIdentifiers
 import UIKit
 
+enum BackupImportMode {
+    case merge
+    case overwrite
+}
+
+struct BackupContents {
+    let payload: DaymarkBackupPayload
+    let imageFiles: [String: Data]
+}
+
+enum BackupError: LocalizedError {
+    case invalidArchive
+    case missingEntriesJSON
+    case invalidEntriesJSON
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidArchive: return "The file is not a valid backup archive."
+        case .missingEntriesJSON: return "The archive does not contain entries.json."
+        case .invalidEntriesJSON: return "Could not read backup metadata."
+        }
+    }
+}
+
 struct PhotoStore {
     private let imageCache = NSCache<NSString, UIImage>()
     private let thumbnailCache = NSCache<NSString, UIImage>()
@@ -42,8 +66,7 @@ struct PhotoStore {
                 id: entry.id,
                 day: entry.day,
                 captureDate: entry.captureDate,
-                imageData: entry.imageData,
-                thumbnailData: entry.thumbnailData,
+                imageFilename: entry.imageData != nil ? "\(entry.id).jpg" : nil,
                 latitude: entry.latitude,
                 longitude: entry.longitude,
                 timezone: entry.timezone,
@@ -54,8 +77,16 @@ struct PhotoStore {
             )
         }
 
-        let payload = DaymarkBackupPayload(version: 1, exportedAt: Date(), entries: backupEntries)
-        return try DaymarkBackupExportItem(data: encodedBackupData(for: payload))
+        let payload = DaymarkBackupPayload(version: 2, exportedAt: Date(), entries: backupEntries)
+        let jsonData = try encodedBackupData(for: payload)
+
+        var zipEntries = [ZipArchive.Entry(path: "entries.json", data: jsonData)]
+        for entry in entries {
+            guard let imageData = entry.imageData else { continue }
+            zipEntries.append(ZipArchive.Entry(path: "images/\(entry.id).jpg", data: imageData))
+        }
+
+        return DaymarkBackupExportItem(data: ZipArchive.create(entries: zipEntries))
     }
 
     func savePhotoData(_ data: Data, for date: Date, in modelContext: ModelContext) async throws {
@@ -118,7 +149,7 @@ struct PhotoStore {
         try modelContext.save()
     }
 
-    func importBackup(from url: URL, into modelContext: ModelContext) throws {
+    func parseBackup(from url: URL) throws -> BackupContents {
         let didAccessSecurityScope = url.startAccessingSecurityScopedResource()
         defer {
             if didAccessSecurityScope {
@@ -127,12 +158,50 @@ struct PhotoStore {
         }
 
         let data = try Data(contentsOf: url)
-        let payload = try decodedBackupPayload(from: data)
 
-        for backupEntry in payload.entries {
+        if data.count >= 2 && data[data.startIndex] == 0x50 && data[data.startIndex + 1] == 0x4B {
+            let zipEntries = try ZipArchive.read(from: data)
+
+            guard let jsonEntry = zipEntries.first(where: { $0.path == "entries.json" }) else {
+                throw BackupError.missingEntriesJSON
+            }
+
+            let payload: DaymarkBackupPayload
+            do {
+                payload = try decodedBackupPayload(from: jsonEntry.data)
+            } catch {
+                throw BackupError.invalidEntriesJSON
+            }
+
+            var imageFiles: [String: Data] = [:]
+            for entry in zipEntries where entry.path.hasPrefix("images/") {
+                let filename = String(entry.path.dropFirst("images/".count))
+                guard !filename.isEmpty else { continue }
+                imageFiles[filename] = entry.data
+            }
+
+            return BackupContents(payload: payload, imageFiles: imageFiles)
+        }
+
+        let payload: DaymarkBackupPayload
+        do {
+            payload = try decodedBackupPayload(from: data)
+        } catch {
+            throw BackupError.invalidEntriesJSON
+        }
+        return BackupContents(payload: payload, imageFiles: [:])
+    }
+
+    func importBackup(from contents: BackupContents, mode: BackupImportMode, into modelContext: ModelContext) throws {
+        for backupEntry in contents.payload.entries {
             let normalizedDate = normalizedDay(for: backupEntry.day)
-            let entry = try existingEntry(for: normalizedDate, in: modelContext) ?? PhotoEntry(day: normalizedDate)
+            let existing = try existingEntry(for: normalizedDate, in: modelContext)
 
+            if mode == .merge && existing != nil {
+                continue
+            }
+
+            let entry = existing ?? PhotoEntry(day: normalizedDate)
             if entry.modelContext == nil {
                 modelContext.insert(entry)
             }
@@ -142,8 +211,6 @@ struct PhotoStore {
             }
             entry.day = normalizedDate
             entry.captureDate = backupEntry.captureDate
-            entry.imageData = backupEntry.imageData
-            entry.thumbnailData = backupEntry.thumbnailData
             entry.imageFilename = nil
             entry.latitude = backupEntry.latitude
             entry.longitude = backupEntry.longitude
@@ -152,6 +219,15 @@ struct PhotoStore {
             entry.countryName = backupEntry.countryName
             entry.city = backupEntry.city
             entry.caption = backupEntry.caption
+
+            if let filename = backupEntry.imageFilename,
+               let imageData = contents.imageFiles[filename] {
+                entry.imageData = imageData
+                entry.thumbnailData = try? thumbnailData(from: imageData)
+            } else if let legacyImageData = backupEntry.legacyImageData {
+                entry.imageData = legacyImageData
+                entry.thumbnailData = backupEntry.legacyThumbnailData ?? (try? thumbnailData(from: legacyImageData))
+            }
 
             invalidateCaches(for: entry)
         }
@@ -468,8 +544,7 @@ struct DaymarkBackupEntry: Codable {
     let id: String?
     let day: Date
     let captureDate: Date?
-    let imageData: Data?
-    let thumbnailData: Data?
+    let imageFilename: String?
     let latitude: Double?
     let longitude: Double?
     let timezone: String?
@@ -477,6 +552,17 @@ struct DaymarkBackupEntry: Codable {
     let countryName: String?
     let city: String?
     let caption: String?
+
+    var legacyImageData: Data? = nil
+    var legacyThumbnailData: Data? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id, day, captureDate, imageFilename
+        case latitude, longitude, timezone
+        case countryCode, countryName, city, caption
+        case legacyImageData = "imageData"
+        case legacyThumbnailData = "thumbnailData"
+    }
 }
 
 struct DaymarkBackupPayload: Codable {
@@ -486,15 +572,160 @@ struct DaymarkBackupPayload: Codable {
 }
 
 struct DaymarkBackupExportItem: Transferable {
-    init(data: Data) throws {
-        self.data = data
-    }
-
     let data: Data
 
     static var transferRepresentation: some TransferRepresentation {
-        DataRepresentation(exportedContentType: .json) { item in
+        DataRepresentation(exportedContentType: .zip) { item in
             item.data
         }
+    }
+}
+
+// MARK: - Zip Archive
+
+enum ZipArchive {
+    struct Entry {
+        let path: String
+        let data: Data
+    }
+
+    static func create(entries: [Entry]) -> Data {
+        var archive = Data()
+        var centralDirectory = Data()
+        var entryCount: UInt16 = 0
+
+        for entry in entries {
+            let nameData = Data(entry.path.utf8)
+            let crc = crc32Checksum(entry.data)
+            let offset = UInt32(archive.count)
+            let size = UInt32(entry.data.count)
+
+            archive.appendUInt32(0x04034b50)
+            archive.appendUInt16(20)
+            archive.appendUInt16(0)
+            archive.appendUInt16(0)
+            archive.appendUInt16(0)
+            archive.appendUInt16(0)
+            archive.appendUInt32(crc)
+            archive.appendUInt32(size)
+            archive.appendUInt32(size)
+            archive.appendUInt16(UInt16(nameData.count))
+            archive.appendUInt16(0)
+            archive.append(nameData)
+            archive.append(entry.data)
+
+            centralDirectory.appendUInt32(0x02014b50)
+            centralDirectory.appendUInt16(20)
+            centralDirectory.appendUInt16(20)
+            centralDirectory.appendUInt16(0)
+            centralDirectory.appendUInt16(0)
+            centralDirectory.appendUInt16(0)
+            centralDirectory.appendUInt16(0)
+            centralDirectory.appendUInt32(crc)
+            centralDirectory.appendUInt32(size)
+            centralDirectory.appendUInt32(size)
+            centralDirectory.appendUInt16(UInt16(nameData.count))
+            centralDirectory.appendUInt16(0)
+            centralDirectory.appendUInt16(0)
+            centralDirectory.appendUInt16(0)
+            centralDirectory.appendUInt16(0)
+            centralDirectory.appendUInt32(0)
+            centralDirectory.appendUInt32(offset)
+            centralDirectory.append(nameData)
+
+            entryCount += 1
+        }
+
+        let centralDirectoryOffset = UInt32(archive.count)
+        archive.append(centralDirectory)
+
+        archive.appendUInt32(0x06054b50)
+        archive.appendUInt16(0)
+        archive.appendUInt16(0)
+        archive.appendUInt16(entryCount)
+        archive.appendUInt16(entryCount)
+        archive.appendUInt32(UInt32(centralDirectory.count))
+        archive.appendUInt32(centralDirectoryOffset)
+        archive.appendUInt16(0)
+
+        return archive
+    }
+
+    static func read(from data: Data) throws -> [Entry] {
+        guard data.count >= 22 else { throw BackupError.invalidArchive }
+
+        var eocdOffset = data.count - 22
+        while eocdOffset >= 0 {
+            if data.readZipUInt32(at: eocdOffset) == 0x06054b50 { break }
+            eocdOffset -= 1
+        }
+        guard eocdOffset >= 0 else { throw BackupError.invalidArchive }
+
+        let entryCount = Int(data.readZipUInt16(at: eocdOffset + 10))
+        let centralDirOffset = Int(data.readZipUInt32(at: eocdOffset + 16))
+
+        var entries: [Entry] = []
+        var offset = centralDirOffset
+
+        for _ in 0..<entryCount {
+            guard offset + 46 <= data.count,
+                  data.readZipUInt32(at: offset) == 0x02014b50 else {
+                throw BackupError.invalidArchive
+            }
+
+            let compressedSize = Int(data.readZipUInt32(at: offset + 20))
+            let nameLength = Int(data.readZipUInt16(at: offset + 28))
+            let extraLength = Int(data.readZipUInt16(at: offset + 30))
+            let commentLength = Int(data.readZipUInt16(at: offset + 32))
+            let localOffset = Int(data.readZipUInt32(at: offset + 42))
+
+            let nameStart = offset + 46
+            guard nameStart + nameLength <= data.count else { throw BackupError.invalidArchive }
+            let name = String(data: data[nameStart..<nameStart + nameLength], encoding: .utf8) ?? ""
+
+            guard localOffset + 30 <= data.count else { throw BackupError.invalidArchive }
+            let localNameLength = Int(data.readZipUInt16(at: localOffset + 26))
+            let localExtraLength = Int(data.readZipUInt16(at: localOffset + 28))
+            let dataStart = localOffset + 30 + localNameLength + localExtraLength
+            guard dataStart + compressedSize <= data.count else { throw BackupError.invalidArchive }
+
+            entries.append(Entry(path: name, data: Data(data[dataStart..<dataStart + compressedSize])))
+            offset = nameStart + nameLength + extraLength + commentLength
+        }
+
+        return entries
+    }
+
+    private static let crc32Table: [UInt32] = (0..<256).map { i in
+        var c = UInt32(i)
+        for _ in 0..<8 { c = (c & 1) != 0 ? (0xEDB88320 ^ (c >> 1)) : (c >> 1) }
+        return c
+    }
+
+    private static func crc32Checksum(_ data: Data) -> UInt32 {
+        var crc: UInt32 = 0xFFFFFFFF
+        for byte in data { crc = crc32Table[Int((crc ^ UInt32(byte)) & 0xFF)] ^ (crc >> 8) }
+        return crc ^ 0xFFFFFFFF
+    }
+}
+
+private extension Data {
+    mutating func appendUInt16(_ value: UInt16) {
+        var v = value.littleEndian
+        append(Data(bytes: &v, count: 2))
+    }
+
+    mutating func appendUInt32(_ value: UInt32) {
+        var v = value.littleEndian
+        append(Data(bytes: &v, count: 4))
+    }
+
+    func readZipUInt16(at offset: Int) -> UInt16 {
+        UInt16(self[offset]) | (UInt16(self[offset + 1]) << 8)
+    }
+
+    func readZipUInt32(at offset: Int) -> UInt32 {
+        UInt32(self[offset]) | (UInt32(self[offset + 1]) << 8) |
+        (UInt32(self[offset + 2]) << 16) | (UInt32(self[offset + 3]) << 24)
     }
 }
