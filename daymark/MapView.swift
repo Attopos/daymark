@@ -38,7 +38,7 @@ struct MapView: View {
             }
             .mapScope(mapScope)
             .navigationTitle("Maps")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbarTitleDisplayMode(.inlineLarge)
             .onAppear {
                 locationManager.requestAuthorizationIfNeeded()
                 focusMapIfNeeded()

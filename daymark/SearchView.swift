@@ -72,7 +72,7 @@ struct SearchView: View {
             }
         }
         .navigationTitle("Search")
-        .navigationBarTitleDisplayMode(.inline)
+        .toolbarTitleDisplayMode(.inlineLarge)
         .searchable(
             text: $searchText,
             isPresented: $isSearchPresented,

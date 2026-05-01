@@ -28,14 +28,11 @@ struct CalendarView: View {
                 }
             }
             .navigationTitle("Daymark")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbarTitleDisplayMode(.inlineLarge)
             .navigationDestination(for: PhotoEntry.self) { entry in
                 PhotoDetailView(entry: entry)
             }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    SignInAvatarButton()
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
                         SearchView(autoActivateSearch: true)

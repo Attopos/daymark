@@ -34,9 +34,9 @@ struct SettingsView: View {
                 .padding(.top, 20)
             }
             .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .topBarTrailing) {
                     SignInAvatarButton()
                 }
             }
