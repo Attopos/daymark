@@ -10,6 +10,9 @@ struct CalendarView: View {
     private let photoStore = PhotoStore()
     @State private var selectedItem: PhotosPickerItem?
     @State private var errorMessage: String?
+    @State private var showingAddSheet = false
+    @State private var addSheetDate = Date()
+    @State private var addSheetPhotoItem: PhotosPickerItem?
 
     private let calendar = Calendar.current
 
@@ -33,6 +36,17 @@ struct CalendarView: View {
                 PhotoDetailView(entry: entry)
             }
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        addSheetDate = Date()
+                        addSheetPhotoItem = nil
+                        showingAddSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Add Daymark")
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
                         SearchView(autoActivateSearch: true)
@@ -69,6 +83,54 @@ struct CalendarView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage ?? "Could not import that photo.")
+        }
+        .sheet(isPresented: $showingAddSheet) {
+            NavigationStack {
+                VStack(spacing: 20) {
+                    DatePicker(
+                        "Date",
+                        selection: $addSheetDate,
+                        in: ...Date(),
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.graphical)
+
+                    PhotosPicker(selection: $addSheetPhotoItem, matching: .images) {
+                        Text("Choose Photo")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .padding(.horizontal)
+                }
+                .navigationTitle("Add Daymark")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            showingAddSheet = false
+                        }
+                    }
+                }
+            }
+        }
+        .onChange(of: addSheetPhotoItem) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                do {
+                    guard let data = try await newItem.loadTransferable(type: Data.self) else {
+                        errorMessage = "Could not import that photo."
+                        addSheetPhotoItem = nil
+                        return
+                    }
+                    try await photoStore.savePhotoData(data, for: addSheetDate, in: modelContext)
+                    showingAddSheet = false
+                } catch {
+                    errorMessage = "Could not import that photo."
+                }
+                addSheetPhotoItem = nil
+            }
         }
     }
 
