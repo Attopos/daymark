@@ -16,6 +16,10 @@ struct ContentView: View {
                 MapView()
             }
 
+            Tab("Timeline", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90") {
+                TimelineView()
+            }
+
             Tab("Settings", systemImage: "gearshape") {
                 SettingsView(prefersDarkMode: $prefersDarkMode)
             }
