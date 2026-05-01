@@ -4,6 +4,7 @@ import SwiftData
 @main
 struct DaymarkApp: App {
     @State private var authManager = AuthManager()
+    @State private var locationLocalizer = LocationLocalizer()
 
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
@@ -22,6 +23,7 @@ struct DaymarkApp: App {
         WindowGroup {
             ContentView()
                 .environment(authManager)
+                .environment(locationLocalizer)
                 .task {
                     await authManager.checkCredentialState()
                 }

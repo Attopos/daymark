@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 
 struct SearchView: View {
+    @Environment(LocationLocalizer.self) private var locationLocalizer
     @Query(sort: \PhotoEntry.day, order: .reverse) private var allEntries: [PhotoEntry]
     private let photoStore = PhotoStore()
     private let calendar = Calendar.current
@@ -19,10 +20,12 @@ struct SearchView: View {
         allEntries.filter { entry in
             guard !searchText.isEmpty else { return true }
 
-            let matches = [entry.city, entry.countryName, entry.countryCode, entry.caption]
+            let storedFields = [entry.city, entry.countryName, entry.countryCode, entry.caption]
                 .compactMap { $0 }
-                .contains { $0.localizedCaseInsensitiveContains(searchText) }
-            if matches {
+            let localizedFields = [locationLocalizer.localizedCity(for: entry), locationLocalizer.localizedCountryName(for: entry)]
+                .compactMap { $0 }
+            let allFields = storedFields + localizedFields
+            if allFields.contains(where: { $0.localizedCaseInsensitiveContains(searchText) }) {
                 return true
             }
 
@@ -49,7 +52,7 @@ struct SearchView: View {
                                     MarkCard(
                                         image: photoStore.thumbnail(for: entry),
                                         dayText: dayLabel(for: entry.day),
-                                        subtitleText: entry.city ?? entry.day.formatted(.dateTime.month(.abbreviated).year()),
+                                        subtitleText: locationLocalizer.localizedCity(for: entry) ?? entry.day.formatted(.dateTime.month(.abbreviated).year()),
                                         flagEmoji: entry.flagEmoji,
                                         size: metrics.cellSize
                                     )
@@ -72,6 +75,9 @@ struct SearchView: View {
             )
             .navigationDestination(for: PhotoEntry.self) { entry in
                 PhotoDetailView(entry: entry)
+            }
+            .task {
+                await locationLocalizer.localize(allEntries)
             }
             .onAppear {
                 guard autoActivateSearch else { return }

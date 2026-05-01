@@ -256,19 +256,25 @@ struct PhotoStore {
     }
 
     func backfillLocationDetails(for entries: [PhotoEntry], in modelContext: ModelContext) async {
+        let needsNormalization = !UserDefaults.standard.bool(forKey: "locationNamesNormalizedToEnglish")
         var didUpdate = false
         for entry in entries {
-            guard (entry.countryCode == nil || entry.countryName == nil || entry.city == nil),
-                  let lat = entry.latitude,
-                  let lon = entry.longitude else { continue }
+            guard let lat = entry.latitude, let lon = entry.longitude else { continue }
+
+            let needsBackfill = entry.countryCode == nil || entry.countryName == nil || entry.city == nil
+            guard needsBackfill || needsNormalization else { continue }
+
             let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
             let details = await reverseGeocodeDetails(for: coordinate)
             if entry.countryCode != details.countryCode || entry.countryName != details.countryName || entry.city != details.city {
-                entry.countryCode = details.countryCode
-                entry.countryName = details.countryName
-                entry.city = details.city
+                entry.countryCode = details.countryCode ?? entry.countryCode
+                entry.countryName = details.countryName ?? entry.countryName
+                entry.city = details.city ?? entry.city
                 didUpdate = true
             }
+        }
+        if needsNormalization {
+            UserDefaults.standard.set(true, forKey: "locationNamesNormalizedToEnglish")
         }
         if didUpdate {
             try? modelContext.save()
@@ -435,8 +441,11 @@ struct PhotoStore {
 
     private func reverseGeocodeDetails(for coordinate: CLLocationCoordinate2D) async -> (countryCode: String?, countryName: String?, city: String?) {
         let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-        guard let request = MKReverseGeocodingRequest(location: location),
-              let mapItem = try? await request.mapItems.first else {
+        guard let request = MKReverseGeocodingRequest(location: location) else {
+            return (nil, nil, nil)
+        }
+        request.preferredLocale = Locale(identifier: "en")
+        guard let mapItem = try? await request.mapItems.first else {
             return (nil, nil, nil)
         }
 

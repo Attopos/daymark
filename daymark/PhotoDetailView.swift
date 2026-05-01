@@ -7,6 +7,8 @@ struct PhotoDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
+    @Environment(LocationLocalizer.self) private var locationLocalizer
+
     let entry: PhotoEntry
     private let photoStore = PhotoStore()
     @State private var selectedItem: PhotosPickerItem?
@@ -80,6 +82,9 @@ struct PhotoDetailView: View {
         } message: {
             Text(errorMessage ?? "Something went wrong.")
         }
+        .task {
+            await locationLocalizer.localize(entry)
+        }
         .sheet(isPresented: $showingPhotoEditor) {
             if let image = photoStore.image(for: entry) {
                 PhotoEditView(image: image) { editedImage in
@@ -123,10 +128,10 @@ struct PhotoDetailView: View {
                 )
             }
 
-            if let city = entry.city, let countryCode = entry.countryCode {
+            if let city = locationLocalizer.localizedCity(for: entry), let countryCode = entry.countryCode {
                 let flag = entry.flagEmoji ?? ""
                 metadataRow(icon: "location", title: "Location", value: "\(flag) \(city), \(countryCode)")
-            } else if let city = entry.city {
+            } else if let city = locationLocalizer.localizedCity(for: entry) {
                 metadataRow(icon: "location", title: "Location", value: city)
             }
 
