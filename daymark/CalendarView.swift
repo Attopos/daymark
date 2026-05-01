@@ -36,6 +36,14 @@ struct CalendarView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     SignInAvatarButton()
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        SearchView(autoActivateSearch: true)
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .accessibilityLabel("Search Photos")
+                }
             }
         }
         .task {

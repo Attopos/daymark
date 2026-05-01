@@ -31,12 +31,8 @@ struct MapView: View {
             }
             .mapStyle(.standard(elevation: .realistic))
             .mapControls {
-                Button {
-                    locationManager.requestCurrentLocation()
-                } label: {
-                    Image(systemName: "location.fill")
-                }
-                .accessibilityLabel("Show Current Location")
+                MapUserLocationButton(scope: mapScope)
+                    .accessibilityLabel("Show Current Location")
                 MapCompass()
                 MapScaleView()
             }

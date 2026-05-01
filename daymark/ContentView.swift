@@ -12,10 +12,6 @@ struct ContentView: View {
                 CalendarView()
             }
 
-            Tab("Search", systemImage: "magnifyingglass") {
-                SearchView()
-            }
-
             Tab("Maps", systemImage: "map") {
                 MapView()
             }
