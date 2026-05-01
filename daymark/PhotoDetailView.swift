@@ -14,6 +14,7 @@ struct PhotoDetailView: View {
     @State private var selectedItem: PhotosPickerItem?
     @State private var showingDeleteConfirmation = false
     @State private var showingPhotoEditor = false
+    @State private var showingLocationPicker = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -96,6 +97,18 @@ struct PhotoDetailView: View {
                 }
             }
         }
+        .sheet(isPresented: $showingLocationPicker) {
+            LocationPickerView { lat, lon, city, countryCode, countryName in
+                entry.latitude = lat
+                entry.longitude = lon
+                entry.city = city
+                entry.countryCode = countryCode
+                entry.countryName = countryName
+                Task {
+                    await locationLocalizer.localize(entry)
+                }
+            }
+        }
     }
 
     private var photoSection: some View {
@@ -119,28 +132,31 @@ struct PhotoDetailView: View {
     }
 
     private var metadataSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let captureDate = entry.captureDate {
-                metadataRow(
-                    icon: "clock",
-                    title: "Taken",
-                    value: captureDate.formatted(.dateTime.month(.wide).day().year().hour().minute())
-                )
-            }
-
+        HStack {
             if let city = locationLocalizer.localizedCity(for: entry), let countryCode = entry.countryCode {
                 let flag = entry.flagEmoji ?? ""
                 metadataRow(icon: "location", title: "Location", value: "\(flag) \(city), \(countryCode)")
             } else if let city = locationLocalizer.localizedCity(for: entry) {
                 metadataRow(icon: "location", title: "Location", value: city)
-            }
-
-            if entry.latitude != nil, entry.longitude != nil, entry.city == nil {
+            } else if entry.latitude != nil, entry.longitude != nil {
                 metadataRow(
                     icon: "location",
                     title: "Coordinates",
                     value: formatCoordinates(lat: entry.latitude!, lon: entry.longitude!)
                 )
+            }
+
+            Spacer()
+
+            Button {
+                showingLocationPicker = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "map")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Choose on the map")
+                        .font(.subheadline)
+                }
             }
         }
         .padding(16)
