@@ -201,63 +201,65 @@ struct MarkCard: View {
     let size: CGFloat
 
     var body: some View {
-        ZStack {
-            Group {
-                if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    LinearGradient(
-                        colors: [Color(.secondarySystemBackground), Color(.systemGray6)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+        if size > 0 {
+            ZStack {
+                Group {
+                    if let image {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        LinearGradient(
+                            colors: [Color(.secondarySystemBackground), Color(.systemGray6)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
 
-                    Image(systemName: "photo")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        Image(systemName: "photo")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
                 }
-            }
-            .frame(width: size, height: size)
-            .clipped()
+                .frame(width: size, height: size)
+                .clipped()
 
-            LinearGradient(
-                colors: [.black.opacity(0.42), .clear],
-                startPoint: .top,
-                endPoint: .center
-            )
-            .frame(width: size, height: size)
+                LinearGradient(
+                    colors: [.black.opacity(0.42), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
+                .frame(width: size, height: size)
 
-            VStack(spacing: 0) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(dayText)
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
+                VStack(spacing: 0) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(dayText)
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
 
-                        Text(subtitleText)
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.88))
+                            Text(subtitleText)
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.88))
+                        }
+
+                        Spacer(minLength: 0)
+
+                        if let flagEmoji {
+                            Text(flagEmoji)
+                                .font(.system(size: 14))
+                                .frame(width: 28, height: 28)
+                                .background(.white, in: Circle())
+                        }
                     }
 
                     Spacer(minLength: 0)
-
-                    if let flagEmoji {
-                        Text(flagEmoji)
-                            .font(.system(size: 14))
-                            .frame(width: 28, height: 28)
-                            .background(.white, in: Circle())
-                    }
                 }
-
-                Spacer(minLength: 0)
+                .padding(8)
             }
-            .padding(8)
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
 
