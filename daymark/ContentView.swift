@@ -24,7 +24,7 @@ struct ContentView: View {
                 SettingsView(prefersDarkMode: $prefersDarkMode)
             }
         }
-        .preferredColorScheme(prefersDarkMode ? .dark : nil)
+        .preferredColorScheme(prefersDarkMode ? .dark : .light)
         .task {
             await photoStore.migrateLegacyLibraryIfNeeded(in: modelContext)
             let descriptor = FetchDescriptor<PhotoEntry>()
