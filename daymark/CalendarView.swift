@@ -294,16 +294,28 @@ struct CalendarView: View {
     }
 
     private func photoGrid(metrics: LayoutMetrics) -> some View {
-        LazyVGrid(columns: columns(for: metrics), spacing: metrics.gridSpacing) {
+        LazyVStack(alignment: .leading, spacing: 16) {
             if canCreateTodayMark {
-                addMarkTile(size: metrics.cellSize)
+                LazyVGrid(columns: columns(for: metrics), spacing: metrics.gridSpacing) {
+                    addMarkTile(size: metrics.cellSize)
+                }
             }
 
-            ForEach(entries) { entry in
-                NavigationLink(value: entry) {
-                    photoTile(for: entry, size: metrics.cellSize)
+            ForEach(entryMonths, id: \.self) { month in
+                Section {
+                    LazyVGrid(columns: columns(for: metrics), spacing: metrics.gridSpacing) {
+                        ForEach(entries(in: month)) { entry in
+                            NavigationLink(value: entry) {
+                                photoTile(for: entry, size: metrics.cellSize)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                } header: {
+                    Text(month.formatted(.dateTime.month(.wide).year()))
+                        .font(.title3.bold())
+                        .padding(.top, 8)
                 }
-                .buttonStyle(.plain)
             }
         }
     }
@@ -353,10 +365,23 @@ struct CalendarView: View {
         MarkCard(
             image: photoStore.thumbnail(for: entry),
             dayText: dayLabel(for: entry.day),
-            subtitleText: monthLabel(for: entry.day),
+            subtitleText: nil,
             flagEmoji: entry.flagEmoji,
             size: size
         )
+    }
+
+    private var entryMonths: [Date] {
+        entries.reduce(into: [Date]()) { months, entry in
+            let month = calendar.startOfMonth(for: entry.day)
+            if !months.contains(month) {
+                months.append(month)
+            }
+        }
+    }
+
+    private func entries(in month: Date) -> [PhotoEntry] {
+        entries.filter { calendar.isDate($0.day, equalTo: month, toGranularity: .month) }
     }
 
     private var pastMonths: [Date] {
@@ -580,7 +605,7 @@ private extension Calendar {
 struct MarkCard: View {
     let image: UIImage?
     let dayText: String
-    let subtitleText: String
+    let subtitleText: String?
     let flagEmoji: String?
     let size: CGFloat
 
@@ -621,9 +646,11 @@ struct MarkCard: View {
                                 .font(.system(size: 16, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
 
-                            Text(subtitleText)
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.88))
+                            if let subtitleText {
+                                Text(subtitleText)
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.88))
+                            }
                         }
 
                         Spacer(minLength: 0)
