@@ -72,6 +72,11 @@ private struct TimelineCardRow: View {
             Text(entry.day.formatted(.dateTime.month(.abbreviated)))
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundStyle(.secondary)
+            if !calendar.isDate(entry.day, equalTo: .now, toGranularity: .year) {
+                Text(entry.day.formatted(.dateTime.year()))
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
         }
         .frame(width: 50)
         .padding(.top, 14)

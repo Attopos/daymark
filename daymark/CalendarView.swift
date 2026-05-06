@@ -190,15 +190,44 @@ struct CalendarView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Button {
+                    displayedMonth = calendar.date(byAdding: .year, value: -1, to: displayedMonth) ?? displayedMonth
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.headline)
+                }
+                .frame(minWidth: 44, minHeight: 44)
+
+                Spacer()
+
+                Text(displayedMonth.formatted(.dateTime.year()))
+                    .font(.headline)
+
+                Spacer()
+
+                Button {
+                    let nextYear = calendar.date(byAdding: .year, value: 1, to: displayedMonth) ?? displayedMonth
+                    displayedMonth = min(nextYear, calendar.startOfMonth(for: Date()))
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.headline)
+                }
+                .frame(minWidth: 44, minHeight: 44)
+                .disabled(isDisplayingCurrentYear)
+            }
+            .padding(.horizontal, 4)
+
+            HStack {
+                Button {
                     displayedMonth = calendar.date(byAdding: .month, value: -1, to: displayedMonth) ?? displayedMonth
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.headline)
                 }
+                .frame(minWidth: 44, minHeight: 44)
 
                 Spacer()
 
-                Text(displayedMonth.formatted(.dateTime.month(.wide).year()))
+                Text(displayedMonth.formatted(.dateTime.month(.wide)))
                     .font(.headline)
 
                 Spacer()
@@ -210,8 +239,10 @@ struct CalendarView: View {
                     Image(systemName: "chevron.right")
                         .font(.headline)
                 }
+                .frame(minWidth: 44, minHeight: 44)
                 .disabled(isDisplayingCurrentMonth)
             }
+            .padding(.horizontal, 4)
 
             let symbols = calendar.veryShortWeekdaySymbols
             let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 7)
@@ -443,6 +474,10 @@ struct CalendarView: View {
 
     private var isDisplayingCurrentMonth: Bool {
         calendar.isDate(displayedMonth, equalTo: Date(), toGranularity: .month)
+    }
+
+    private var isDisplayingCurrentYear: Bool {
+        calendar.isDate(displayedMonth, equalTo: Date(), toGranularity: .year)
     }
 
     private func columns(for metrics: LayoutMetrics) -> [GridItem] {
