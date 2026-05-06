@@ -28,6 +28,7 @@ struct SettingsView: View {
                 VStack(spacing: 18) {
                     appearanceCard
                     reminderCard
+                    iCloudSyncCard
                     libraryCard
                 }
                 .padding(.horizontal, 16)
@@ -188,6 +189,39 @@ struct SettingsView: View {
                 reminderMinute = components.minute ?? 0
             }
         )
+    }
+
+    private var iCloudSyncCard: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "icloud.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .frame(width: 40, height: 40)
+                .glassEffect(.regular.interactive(), in: .circle)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("iCloud Sync")
+                    .font(.headline)
+
+                if FileManager.default.ubiquityIdentityToken != nil {
+                    Text("Photos sync across your devices")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Sign in to iCloud to enable sync")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: FileManager.default.ubiquityIdentityToken != nil ? "checkmark.circle.fill" : "xmark.circle")
+                .font(.system(size: 20))
+                .foregroundStyle(FileManager.default.ubiquityIdentityToken != nil ? .green : .secondary)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24))
     }
 
     private var libraryCard: some View {

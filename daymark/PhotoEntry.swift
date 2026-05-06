@@ -4,7 +4,7 @@ import SwiftData
 @Model
 final class PhotoEntry {
     var id: String = UUID().uuidString
-    @Attribute(.unique) var day: Date
+    var day: Date
     @Attribute(.externalStorage) var imageData: Data?
     @Attribute(.externalStorage) var thumbnailData: Data?
     var captureDate: Date?
