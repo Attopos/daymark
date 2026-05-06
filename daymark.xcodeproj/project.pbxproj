@@ -401,7 +401,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = daymark/Info.plist;
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Allow Daymark to access your location to show places on the map and help organize entries.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Enable face ID to unlock your photos.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Allow Daymark to access your location to show places on the map.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Allow Daymark to access your photo library so you can pick photos for your entries.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -442,7 +443,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = daymark/Info.plist;
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Allow Daymark to access your location to show places on the map and help organize entries.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Enable face ID to unlock your photos.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Allow Daymark to access your location to show places on the map.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Allow Daymark to access your photo library so you can pick photos for your entries.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

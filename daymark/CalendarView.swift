@@ -13,6 +13,11 @@ struct CalendarView: View {
     @State private var showingAddSheet = false
     @State private var addSheetDate = Date()
     @State private var addSheetPhotoItem: PhotosPickerItem?
+    @State private var displayedMonth = Calendar.current.startOfMonth(for: Date())
+    @State private var showPastDays = false
+    @State private var pastDaysMonthCount = 12
+    @State private var pastDaysSelectedDate = Date()
+    @State private var pastDaysPhotoItem: PhotosPickerItem?
 
     private let calendar = Calendar.current
 
@@ -23,10 +28,17 @@ struct CalendarView: View {
 
                 if metrics.cellSize > 0 {
                     ScrollView {
-                        photoGrid(metrics: metrics)
-                            .padding(.horizontal, metrics.horizontalPadding)
-                            .padding(.top, metrics.topPadding)
-                            .padding(.bottom, metrics.bottomPadding)
+                        if showPastDays {
+                            pastDaysGrid(metrics: metrics)
+                                .padding(.horizontal, metrics.horizontalPadding)
+                                .padding(.top, metrics.topPadding)
+                                .padding(.bottom, metrics.bottomPadding)
+                        } else {
+                            photoGrid(metrics: metrics)
+                                .padding(.horizontal, metrics.horizontalPadding)
+                                .padding(.top, metrics.topPadding)
+                                .padding(.bottom, metrics.bottomPadding)
+                        }
                     }
                 }
             }
@@ -39,12 +51,34 @@ struct CalendarView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         addSheetDate = Date()
+                        displayedMonth = calendar.startOfMonth(for: addSheetDate)
                         addSheetPhotoItem = nil
                         showingAddSheet = true
                     } label: {
                         Image(systemName: "plus")
                     }
                     .accessibilityLabel("Add Daymark")
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button {
+                            withAnimation {
+                                showPastDays.toggle()
+                                if showPastDays {
+                                    pastDaysMonthCount = 12
+                                }
+                            }
+                        } label: {
+                            Label(
+                                showPastDays ? "Show Daymarks" : "Show Past Days",
+                                systemImage: showPastDays ? "photo.on.rectangle" : "calendar"
+                            )
+                        }
+                    } label: {
+                        Image(systemName: "line.3.horizontal.decrease")
+                    }
+                    .accessibilityLabel("Filter")
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
@@ -87,22 +121,24 @@ struct CalendarView: View {
         .sheet(isPresented: $showingAddSheet) {
             NavigationStack {
                 VStack(spacing: 20) {
-                    DatePicker(
-                        "Date",
-                        selection: $addSheetDate,
-                        in: ...Date(),
-                        displayedComponents: .date
-                    )
-                    .datePickerStyle(.graphical)
+                    addDaymarkCalendar
+                        .padding(.horizontal)
 
                     PhotosPicker(selection: $addSheetPhotoItem, matching: .images) {
-                        Text("Choose Photo")
+                        Text(selectedDateHasEntry ? "Date Already Has Daymark" : "Choose Photo")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(selectedDateHasEntry)
                     .padding(.horizontal)
+
+                    if selectedDateHasEntry {
+                        Text("Pick a date without a daymark.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .navigationTitle("Add Daymark")
                 .navigationBarTitleDisplayMode(.inline)
@@ -132,6 +168,98 @@ struct CalendarView: View {
                 addSheetPhotoItem = nil
             }
         }
+        .onChange(of: pastDaysPhotoItem) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                do {
+                    guard let data = try await newItem.loadTransferable(type: Data.self) else {
+                        errorMessage = "Could not import that photo."
+                        pastDaysPhotoItem = nil
+                        return
+                    }
+                    try await photoStore.savePhotoData(data, for: pastDaysSelectedDate, in: modelContext)
+                } catch {
+                    errorMessage = "Could not import that photo."
+                }
+                pastDaysPhotoItem = nil
+            }
+        }
+    }
+
+    private var addDaymarkCalendar: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Button {
+                    displayedMonth = calendar.date(byAdding: .month, value: -1, to: displayedMonth) ?? displayedMonth
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.headline)
+                }
+
+                Spacer()
+
+                Text(displayedMonth.formatted(.dateTime.month(.wide).year()))
+                    .font(.headline)
+
+                Spacer()
+
+                Button {
+                    let nextMonth = calendar.date(byAdding: .month, value: 1, to: displayedMonth) ?? displayedMonth
+                    displayedMonth = min(nextMonth, calendar.startOfMonth(for: Date()))
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.headline)
+                }
+                .disabled(isDisplayingCurrentMonth)
+            }
+
+            let symbols = calendar.veryShortWeekdaySymbols
+            let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 7)
+
+            LazyVGrid(columns: columns, spacing: 12) {
+                ForEach(symbols, id: \.self) { symbol in
+                    Text(symbol)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+
+                ForEach(monthDays(for: displayedMonth)) { day in
+                    if let date = day.date {
+                        let isSelected = calendar.isDate(date, inSameDayAs: addSheetDate)
+                        let isToday = calendar.isDateInToday(date)
+                        let hasEntry = hasEntry(on: date)
+
+                        Button {
+                            addSheetDate = date
+                        } label: {
+                            ZStack {
+                                if hasEntry {
+                                    Rectangle()
+                                        .fill((isSelected ? Color.white : Color.primary).opacity(isSelected ? 0.95 : 0.75))
+                                        .frame(width: 24, height: 2.5)
+                                        .rotationEffect(.degrees(-18))
+                                }
+
+                                Text(dayNumberText(for: date))
+                                    .font(.body.weight(isSelected ? .bold : .regular))
+                                    .foregroundStyle(dayForegroundStyle(isSelected: isSelected, isToday: isToday, hasEntry: hasEntry))
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 36)
+                            .background {
+                                Circle()
+                                    .fill(isSelected ? Color.accentColor : .clear)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Color.clear
+                            .frame(maxWidth: .infinity, minHeight: 36)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 8)
     }
 
     private func photoGrid(metrics: LayoutMetrics) -> some View {
@@ -200,6 +328,104 @@ struct CalendarView: View {
         )
     }
 
+    private var pastMonths: [Date] {
+        (0..<pastDaysMonthCount).compactMap { offset in
+            calendar.date(byAdding: .month, value: -offset, to: calendar.startOfMonth(for: Date()))
+        }
+    }
+
+    private func pastDaysGrid(metrics: LayoutMetrics) -> some View {
+        LazyVStack(alignment: .leading, spacing: 16) {
+            ForEach(pastMonths, id: \.self) { month in
+                Section {
+                    LazyVGrid(columns: columns(for: metrics), spacing: metrics.gridSpacing) {
+                        ForEach(daysInMonth(month), id: \.self) { date in
+                            if let entry = entry(for: date) {
+                                NavigationLink(value: entry) {
+                                    photoTile(for: entry, size: metrics.cellSize)
+                                }
+                                .buttonStyle(.plain)
+                            } else {
+                                emptyDayTile(date: date, size: metrics.cellSize)
+                            }
+                        }
+                    }
+                } header: {
+                    Text(month.formatted(.dateTime.month(.wide).year()))
+                        .font(.title3.bold())
+                        .padding(.top, 8)
+                }
+            }
+
+            Color.clear
+                .frame(height: 1)
+                .onAppear {
+                    pastDaysMonthCount += 12
+                }
+        }
+    }
+
+    private func emptyDayTile(date: Date, size: CGFloat) -> some View {
+        PhotosPicker(selection: Binding(
+            get: { pastDaysPhotoItem },
+            set: { newItem in
+                pastDaysSelectedDate = date
+                pastDaysPhotoItem = newItem
+            }
+        ), matching: .images) {
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+                    .foregroundStyle(Color.primary.opacity(0.18))
+
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(dayLabel(for: date))
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundStyle(.primary)
+
+                        Text(monthLabel(for: date))
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "plus")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(8)
+            }
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func daysInMonth(_ month: Date) -> [Date] {
+        guard let range = calendar.range(of: .day, in: .month, for: month) else { return [] }
+        let today = calendar.startOfDay(for: Date())
+        return range.compactMap { dayNumber -> Date? in
+            var components = calendar.dateComponents([.year, .month], from: month)
+            components.day = dayNumber
+            guard let date = calendar.date(from: components) else { return nil }
+            let startOfDate = calendar.startOfDay(for: date)
+            return startOfDate <= today ? startOfDate : nil
+        }.reversed()
+    }
+
+    private func entry(for date: Date) -> PhotoEntry? {
+        entries.first(where: { calendar.isDate($0.day, inSameDayAs: date) })
+    }
+
     private var errorAlertBinding: Binding<Bool> {
         Binding(
             get: { errorMessage != nil },
@@ -209,6 +435,14 @@ struct CalendarView: View {
 
     private var canCreateTodayMark: Bool {
         !entries.contains(where: { calendar.isDateInToday($0.day) })
+    }
+
+    private var selectedDateHasEntry: Bool {
+        hasEntry(on: addSheetDate)
+    }
+
+    private var isDisplayingCurrentMonth: Bool {
+        calendar.isDate(displayedMonth, equalTo: Date(), toGranularity: .month)
     }
 
     private func columns(for metrics: LayoutMetrics) -> [GridItem] {
@@ -242,6 +476,51 @@ struct CalendarView: View {
     private func monthLabel(for date: Date) -> String {
         date.formatted(.dateTime.month(.abbreviated).year())
     }
+
+    private func hasEntry(on date: Date) -> Bool {
+        entries.contains(where: { calendar.isDate($0.day, inSameDayAs: date) })
+    }
+
+    private func monthDays(for month: Date) -> [CalendarDay] {
+        guard
+            let monthInterval = calendar.dateInterval(of: .month, for: month),
+            let firstWeekInterval = calendar.dateInterval(of: .weekOfMonth, for: monthInterval.start),
+            let lastDay = calendar.date(byAdding: .day, value: -1, to: monthInterval.end),
+            let lastWeekInterval = calendar.dateInterval(of: .weekOfMonth, for: lastDay)
+        else {
+            return []
+        }
+
+        let visibleInterval = DateInterval(start: firstWeekInterval.start, end: lastWeekInterval.end)
+        var days: [CalendarDay] = []
+        var date = visibleInterval.start
+        var index = 0
+
+        while date < visibleInterval.end {
+            let isInDisplayedMonth = calendar.isDate(date, equalTo: month, toGranularity: .month)
+            days.append(CalendarDay(id: index, date: isInDisplayedMonth ? date : nil))
+            date = calendar.date(byAdding: .day, value: 1, to: date) ?? visibleInterval.end
+            index += 1
+        }
+
+        return days
+    }
+
+    private func dayNumberText(for date: Date) -> String {
+        String(calendar.component(.day, from: date))
+    }
+
+    private func dayForegroundStyle(isSelected: Bool, isToday: Bool, hasEntry: Bool) -> Color {
+        if isSelected {
+            return .white
+        }
+
+        if hasEntry {
+            return .primary.opacity(0.55)
+        }
+
+        return isToday ? .accentColor : .primary
+    }
 }
 
 private struct LayoutMetrics {
@@ -250,6 +529,17 @@ private struct LayoutMetrics {
     let topPadding: CGFloat
     let bottomPadding: CGFloat
     let cellSize: CGFloat
+}
+
+private struct CalendarDay: Identifiable {
+    let id: Int
+    let date: Date?
+}
+
+private extension Calendar {
+    func startOfMonth(for value: Date) -> Date {
+        self.date(from: dateComponents([.year, .month], from: value)) ?? value
+    }
 }
 
 struct MarkCard: View {
