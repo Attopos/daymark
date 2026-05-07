@@ -82,7 +82,7 @@ struct MapView: View {
     }
 }
 
-private final class DaymarkLocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
+final class DaymarkLocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var currentRegion: MKCoordinateRegion?
     @Published var showsPermissionAlert = false
 
@@ -149,7 +149,7 @@ private final class DaymarkLocationManager: NSObject, ObservableObject, CLLocati
     }
 }
 
-private struct PhotoMapAnnotation: View {
+struct PhotoMapAnnotation: View {
     let image: UIImage?
 
     var body: some View {

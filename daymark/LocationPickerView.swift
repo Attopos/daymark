@@ -1,12 +1,19 @@
+import Combine
 import CoreLocation
 import MapKit
+import SwiftData
 import SwiftUI
 
 struct LocationPickerView: View {
     @Environment(\.dismiss) private var dismiss
+    @Query(sort: \PhotoEntry.day, order: .reverse) private var entries: [PhotoEntry]
 
     let onLocationSelected: (Double, Double, String?, String?, String?) -> Void
 
+    @Namespace private var mapScope
+    @StateObject private var locationManager = DaymarkLocationManager()
+    private let photoStore = PhotoStore()
+    @State private var didCenterOnUser = false
     @State private var selectedCoordinate: CLLocationCoordinate2D?
     @State private var city: String?
     @State private var countryCode: String?
@@ -28,12 +35,23 @@ struct LocationPickerView: View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 MapReader { proxy in
-                    Map(position: $position) {
+                    Map(position: $position, scope: mapScope) {
                         if let coordinate = selectedCoordinate {
                             Marker("", coordinate: coordinate)
                         }
                         UserAnnotation()
+
+                        ForEach(locatedEntries) { entry in
+                            Annotation("", coordinate: CLLocationCoordinate2D(latitude: entry.latitude ?? 0, longitude: entry.longitude ?? 0), anchor: .bottom) {
+                                PhotoMapAnnotation(image: photoStore.thumbnail(for: entry))
+                            }
+                        }
                     }
+                    .mapControls {
+                        MapUserLocationButton(scope: mapScope)
+                        MapCompass()
+                    }
+                    .mapScope(mapScope)
                     .onTapGesture { screenPosition in
                         isSearching = false
                         if let coordinate = proxy.convert(screenPosition, from: .local) {
@@ -54,6 +72,14 @@ struct LocationPickerView: View {
                         .background(.ultraThinMaterial, in: Capsule())
                         .padding(.bottom, 16)
                 }
+            }
+            .onAppear {
+                locationManager.requestAuthorizationIfNeeded()
+            }
+            .onReceive(locationManager.$currentRegion.compactMap { $0 }) { region in
+                guard !didCenterOnUser else { return }
+                didCenterOnUser = true
+                position = .region(region)
             }
             .navigationTitle("Choose Location")
             .navigationBarTitleDisplayMode(.inline)
@@ -106,6 +132,10 @@ struct LocationPickerView: View {
                 }
             }
         }
+    }
+
+    private var locatedEntries: [PhotoEntry] {
+        entries.filter { $0.latitude != nil && $0.longitude != nil }
     }
 
     private var locationDisplayName: String? {
