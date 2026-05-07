@@ -12,16 +12,25 @@ struct TimelineView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                        NavigationLink(value: entry) {
-                            TimelineCardRow(
-                                entry: entry,
-                                image: photoStore.thumbnail(for: entry),
+                    ForEach(Array(timelineItems.enumerated()), id: \.element.id) { index, item in
+                        switch item {
+                        case .entry(let entry):
+                            NavigationLink(value: entry) {
+                                TimelineCardRow(
+                                    entry: entry,
+                                    image: photoStore.thumbnail(for: entry),
+                                    isFirst: index == 0,
+                                    isLast: index == timelineItems.count - 1
+                                )
+                            }
+                            .buttonStyle(.plain)
+
+                        case .gap:
+                            TimelineGapRow(
                                 isFirst: index == 0,
-                                isLast: index == entries.count - 1
+                                isLast: index == timelineItems.count - 1
                             )
                         }
-                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -42,6 +51,33 @@ struct TimelineView: View {
                 }
             }
         }
+    }
+
+    private var timelineItems: [TimelineItem] {
+        guard entries.count > 1 else {
+            return entries.map(TimelineItem.entry)
+        }
+
+        var items: [TimelineItem] = []
+        let calendar = Calendar.current
+
+        for (index, entry) in entries.enumerated() {
+            items.append(.entry(entry))
+
+            guard index < entries.count - 1 else { continue }
+            let nextEntry = entries[index + 1]
+            let dayGap = calendar.dateComponents(
+                [.day],
+                from: calendar.startOfDay(for: nextEntry.day),
+                to: calendar.startOfDay(for: entry.day)
+            ).day ?? 0
+
+            if dayGap > 1 {
+                items.append(.gap("\(entry.id)-gap-\(nextEntry.id)"))
+            }
+        }
+
+        return items
     }
 }
 
@@ -146,6 +182,62 @@ private struct TimelineCardRow: View {
         }
         .padding(12)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct TimelineGapRow: View {
+    let isFirst: Bool
+    let isLast: Bool
+
+    private let lineWidth: CGFloat = 2.5
+    private let gapDotSize: CGFloat = 4
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            Color.clear
+                .frame(width: 50)
+
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(isFirst ? .clear : Color.primary.opacity(0.12))
+                    .frame(width: lineWidth, height: 10)
+
+                VStack(spacing: 5) {
+                    Circle()
+                        .fill(Color.secondary)
+                        .frame(width: gapDotSize, height: gapDotSize)
+                    Circle()
+                        .fill(Color.secondary)
+                        .frame(width: gapDotSize, height: gapDotSize)
+                    Circle()
+                        .fill(Color.secondary)
+                        .frame(width: gapDotSize, height: gapDotSize)
+                }
+                .frame(width: 24, height: 24)
+
+                Rectangle()
+                    .fill(isLast ? .clear : Color.primary.opacity(0.12))
+                    .frame(width: lineWidth, height: 10)
+            }
+            .frame(width: 24)
+
+            Spacer(minLength: 0)
+        }
+        .frame(height: 44)
+    }
+}
+
+private enum TimelineItem: Identifiable {
+    case entry(PhotoEntry)
+    case gap(String)
+
+    var id: String {
+        switch self {
+        case .entry(let entry):
+            return "entry-\(entry.id)"
+        case .gap(let id):
+            return "gap-\(id)"
+        }
     }
 }
 

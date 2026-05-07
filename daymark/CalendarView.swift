@@ -325,13 +325,9 @@ struct CalendarView: View {
     }
 
     private func gapTile(id: String, size: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(Color(.secondarySystemBackground))
-            .overlay {
-                Text("...")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundStyle(.secondary)
-            }
+        Text("...")
+            .font(.system(size: 24, weight: .bold, design: .rounded))
+            .foregroundStyle(.secondary)
             .frame(width: size, height: size)
             .accessibilityLabel("More daymarks between visible dates")
             .id(id)
