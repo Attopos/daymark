@@ -302,11 +302,17 @@ struct CalendarView: View {
                             addMarkTile(size: metrics.cellSize)
                         }
 
-                        ForEach(entries(in: month)) { entry in
-                            NavigationLink(value: entry) {
-                                photoTile(for: entry, size: metrics.cellSize)
+                        ForEach(photoGridItems(in: month)) { item in
+                            switch item {
+                            case .entry(let entry):
+                                NavigationLink(value: entry) {
+                                    photoTile(for: entry, size: metrics.cellSize)
+                                }
+                                .buttonStyle(.plain)
+
+                            case .gap(let id):
+                                gapTile(id: id, size: metrics.cellSize)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 } header: {
@@ -316,6 +322,46 @@ struct CalendarView: View {
                 }
             }
         }
+    }
+
+    private func gapTile(id: String, size: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .fill(Color(.secondarySystemBackground))
+            .overlay {
+                Text("...")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: size, height: size)
+            .accessibilityLabel("More daymarks between visible dates")
+            .id(id)
+    }
+
+    private func photoGridItems(in month: Date) -> [PhotoGridItem] {
+        let monthEntries = entries(in: month)
+        guard monthEntries.count > 1 else {
+            return monthEntries.map(PhotoGridItem.entry)
+        }
+
+        var items: [PhotoGridItem] = []
+
+        for (index, entry) in monthEntries.enumerated() {
+            items.append(.entry(entry))
+
+            guard index < monthEntries.count - 1 else { continue }
+            let nextEntry = monthEntries[index + 1]
+            let dayGap = calendar.dateComponents(
+                [.day],
+                from: calendar.startOfDay(for: nextEntry.day),
+                to: calendar.startOfDay(for: entry.day)
+            ).day ?? 0
+
+            if dayGap > 1 {
+                items.append(.gap("\(entry.persistentModelID)-gap-\(nextEntry.persistentModelID)"))
+            }
+        }
+
+        return items
     }
 
     private func addMarkTile(size: CGFloat) -> some View {
@@ -601,6 +647,20 @@ private struct LayoutMetrics {
 private struct CalendarDay: Identifiable {
     let id: Int
     let date: Date?
+}
+
+private enum PhotoGridItem: Identifiable {
+    case entry(PhotoEntry)
+    case gap(String)
+
+    var id: String {
+        switch self {
+        case .entry(let entry):
+            return "entry-\(String(describing: entry.persistentModelID))"
+        case .gap(let id):
+            return "gap-\(id)"
+        }
+    }
 }
 
 private extension Calendar {
