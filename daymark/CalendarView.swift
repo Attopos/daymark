@@ -295,15 +295,13 @@ struct CalendarView: View {
 
     private func photoGrid(metrics: LayoutMetrics) -> some View {
         LazyVStack(alignment: .leading, spacing: 16) {
-            if canCreateTodayMark {
-                LazyVGrid(columns: columns(for: metrics), spacing: metrics.gridSpacing) {
-                    addMarkTile(size: metrics.cellSize)
-                }
-            }
-
-            ForEach(entryMonths, id: \.self) { month in
+            ForEach(photoGridMonths, id: \.self) { month in
                 Section {
                     LazyVGrid(columns: columns(for: metrics), spacing: metrics.gridSpacing) {
+                        if canCreateTodayMark && calendar.isDate(month, equalTo: Date(), toGranularity: .month) {
+                            addMarkTile(size: metrics.cellSize)
+                        }
+
                         ForEach(entries(in: month)) { entry in
                             NavigationLink(value: entry) {
                                 photoTile(for: entry, size: metrics.cellSize)
@@ -378,6 +376,15 @@ struct CalendarView: View {
                 months.append(month)
             }
         }
+    }
+
+    private var photoGridMonths: [Date] {
+        let currentMonth = calendar.startOfMonth(for: Date())
+        guard canCreateTodayMark, !entryMonths.contains(currentMonth) else {
+            return entryMonths
+        }
+
+        return [currentMonth] + entryMonths
     }
 
     private func entries(in month: Date) -> [PhotoEntry] {

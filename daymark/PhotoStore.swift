@@ -32,8 +32,16 @@ enum BackupError: LocalizedError {
 }
 
 struct PhotoStore {
-    private let imageCache = NSCache<NSString, UIImage>()
-    private let thumbnailCache = NSCache<NSString, UIImage>()
+    private static let sharedImageCache = NSCache<NSString, UIImage>()
+    private static let sharedThumbnailCache = NSCache<NSString, UIImage>()
+
+    private var imageCache: NSCache<NSString, UIImage> {
+        Self.sharedImageCache
+    }
+
+    private var thumbnailCache: NSCache<NSString, UIImage> {
+        Self.sharedThumbnailCache
+    }
     private let calendar = Calendar.current
     private let fileManager = FileManager.default
     private let exifDateFormatter = {
