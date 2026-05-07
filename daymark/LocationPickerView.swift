@@ -21,6 +21,7 @@ struct LocationPickerView: View {
     @State private var searchText = ""
     @State private var searchResults: [MKMapItem] = []
     @State private var isSearching = false
+    @State private var visibleRegion: MKCoordinateRegion?
     @State private var position: MapCameraPosition = .userLocation(
         followsHeading: false,
         fallback: .region(
@@ -52,6 +53,9 @@ struct LocationPickerView: View {
                         MapCompass()
                     }
                     .mapScope(mapScope)
+                    .onMapCameraChange { context in
+                        visibleRegion = context.region
+                    }
                     .onTapGesture { screenPosition in
                         isSearching = false
                         if let coordinate = proxy.convert(screenPosition, from: .local) {
@@ -169,6 +173,10 @@ struct LocationPickerView: View {
     private func performSearch() async {
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = searchText
+        request.resultTypes = [.address, .pointOfInterest, .physicalFeature]
+        if let visibleRegion {
+            request.region = visibleRegion
+        }
         let search = MKLocalSearch(request: request)
         guard let response = try? await search.start() else {
             searchResults = []
