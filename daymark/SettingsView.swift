@@ -1,7 +1,9 @@
+import CloudKit
+import CoreData
+import Network
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
-import UserNotifications
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
@@ -9,10 +11,6 @@ struct SettingsView: View {
 
     @Binding var prefersDarkMode: Bool
     private let photoStore = PhotoStore()
-
-    @AppStorage("reminderEnabled") private var reminderEnabled = false
-    @AppStorage("reminderHour") private var reminderHour = 20
-    @AppStorage("reminderMinute") private var reminderMinute = 0
 
     @State private var showingExporter = false
     @State private var showingImporter = false
@@ -27,7 +25,6 @@ struct SettingsView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     appearanceCard
-                    reminderCard
                     iCloudSyncCard
                     libraryCard
                 }
@@ -121,107 +118,42 @@ struct SettingsView: View {
         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24))
     }
 
-    private var reminderCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+    private var iCloudSyncCard: some View {
+        NavigationLink {
+            ICloudSyncDetailView()
+        } label: {
             HStack(spacing: 14) {
-                Image(systemName: "bell.badge.fill")
+                Image(systemName: "icloud.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .frame(width: 40, height: 40)
                     .glassEffect(.regular.interactive(), in: .circle)
 
-                Text("Daily Reminder")
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("iCloud Sync")
+                        .font(.headline)
+
+                    if FileManager.default.ubiquityIdentityToken != nil {
+                        Text("Photos sync across your devices")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Sign in to iCloud to enable sync")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
                 Spacer(minLength: 0)
 
-                Toggle("", isOn: $reminderEnabled)
-                    .labelsHidden()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.tertiary)
             }
-
-            if reminderEnabled {
-                DatePicker(
-                    "Reminder time",
-                    selection: reminderTimeBinding,
-                    displayedComponents: .hourAndMinute
-                )
-                .datePickerStyle(.compact)
-                .font(.subheadline)
-            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24))
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24))
-        .onChange(of: reminderEnabled) { _, enabled in
-            Task {
-                if enabled {
-                    let granted = await NotificationManager.requestAuthorization()
-                    if granted {
-                        await NotificationManager.scheduleDailyReminder(at: reminderHour, minute: reminderMinute)
-                    } else {
-                        reminderEnabled = false
-                    }
-                } else {
-                    NotificationManager.cancelDailyReminder()
-                }
-            }
-        }
-        .onChange(of: reminderHour) { _, _ in
-            guard reminderEnabled else { return }
-            Task { await NotificationManager.scheduleDailyReminder(at: reminderHour, minute: reminderMinute) }
-        }
-        .onChange(of: reminderMinute) { _, _ in
-            guard reminderEnabled else { return }
-            Task { await NotificationManager.scheduleDailyReminder(at: reminderHour, minute: reminderMinute) }
-        }
-    }
-
-    private var reminderTimeBinding: Binding<Date> {
-        Binding(
-            get: {
-                var components = DateComponents()
-                components.hour = reminderHour
-                components.minute = reminderMinute
-                return Calendar.current.date(from: components) ?? .now
-            },
-            set: { newDate in
-                let components = Calendar.current.dateComponents([.hour, .minute], from: newDate)
-                reminderHour = components.hour ?? 20
-                reminderMinute = components.minute ?? 0
-            }
-        )
-    }
-
-    private var iCloudSyncCard: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "icloud.fill")
-                .font(.system(size: 18, weight: .semibold))
-                .frame(width: 40, height: 40)
-                .glassEffect(.regular.interactive(), in: .circle)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("iCloud Sync")
-                    .font(.headline)
-
-                if FileManager.default.ubiquityIdentityToken != nil {
-                    Text("Photos sync across your devices")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("Sign in to iCloud to enable sync")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Spacer(minLength: 0)
-
-            Image(systemName: FileManager.default.ubiquityIdentityToken != nil ? "checkmark.circle.fill" : "xmark.circle")
-                .font(.system(size: 20))
-                .foregroundStyle(FileManager.default.ubiquityIdentityToken != nil ? .green : .secondary)
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24))
+        .buttonStyle(.plain)
     }
 
     private var libraryCard: some View {
@@ -298,6 +230,306 @@ struct SettingsView: View {
             errorMessage = error.localizedDescription
         }
         pendingBackup = nil
+    }
+}
+
+struct ICloudSyncDetailView: View {
+    @Environment(\.modelContext) private var modelContext
+    @AppStorage("iCloudSyncEnabled") private var syncEnabled = true
+    @AppStorage("lastSuccessfulSyncTimestamp") private var lastSuccessfulSyncTimestamp: Double = 0
+    @AppStorage("cloudKitFallbackToLocal") private var fellBackToLocal = false
+
+    @State private var networkNormal = false
+    @State private var iCloudConnected = false
+    @State private var syncStatus = "Checking..."
+    @State private var syncMessage: String?
+    @State private var isSyncing = false
+    @State private var syncProgress: Double = 0
+    @State private var syncDirection: SyncDirection?
+    @State private var expectedTotal: Int = 0
+    @State private var progressTask: Task<Void, Never>?
+
+    private enum SyncDirection {
+        case push, pull
+        var label: String { self == .push ? "Pushing" : "Pulling" }
+        var icon: String { self == .push ? "arrow.up.circle.fill" : "arrow.down.circle.fill" }
+        var tint: Color { self == .push ? .blue : .green }
+    }
+
+    private let ckContainer = CKContainer(identifier: "iCloud.com.shizhengcao.Daymark")
+    private let syncZoneID = CKRecordZone.ID(
+        zoneName: "com.apple.coredata.cloudkit.zone",
+        ownerName: CKCurrentUserDefaultName
+    )
+
+    private var lastSyncDate: Date? {
+        lastSuccessfulSyncTimestamp > 0 ? Date(timeIntervalSince1970: lastSuccessfulSyncTimestamp) : nil
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Enable Sync", isOn: $syncEnabled)
+            }
+
+            if syncEnabled {
+                if fellBackToLocal {
+                    Section {
+                        Label("CloudKit failed to initialize. Sync is running in local-only mode. Restart the app to retry.", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                            .font(.subheadline)
+                    }
+                }
+
+                Section {
+                    LabeledContent("Network") {
+                        Text(networkNormal ? "Normal" : "Unavailable")
+                            .foregroundStyle(networkNormal ? Color.primary : Color.red)
+                    }
+
+                    LabeledContent("iCloud") {
+                        Text(iCloudConnected ? "Connected" : "Not Signed In")
+                            .foregroundStyle(iCloudConnected ? Color.primary : Color.red)
+                    }
+
+                    LabeledContent("Syncing Status") {
+                        Text(syncStatus)
+                            .foregroundStyle(syncStatus == "Success" ? .green : .secondary)
+                    }
+
+                    LabeledContent("Recent Sync Date") {
+                        if let lastSyncDate {
+                            Text(lastSyncDate.formatted(.dateTime.year().month().day().hour().minute().second()))
+                        } else {
+                            Text("—")
+                        }
+                    }
+                }
+
+                if isSyncing, let direction = syncDirection {
+                    Section {
+                        VStack(spacing: 10) {
+                            HStack {
+                                Image(systemName: direction.icon)
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(direction.tint)
+                                Text(direction.label)
+                                    .font(.subheadline.weight(.medium))
+                                Spacer()
+                                Text("\(Int(syncProgress * 100))%")
+                                    .font(.subheadline.weight(.bold))
+                                    .monospacedDigit()
+                                    .foregroundStyle(direction.tint)
+                            }
+                            ProgressView(value: syncProgress)
+                                .tint(direction.tint)
+                        }
+                    } footer: {
+                        if let syncMessage {
+                            Text(syncMessage)
+                        }
+                    }
+                }
+
+                Section {
+                    Button {
+                        Task { await manualSync() }
+                    } label: {
+                        HStack {
+                            Text("Sync Now")
+                            Spacer()
+                            if isSyncing && syncDirection == nil {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isSyncing || fellBackToLocal || !iCloudConnected)
+                } footer: {
+                    if !isSyncing, let syncMessage {
+                        Text(syncMessage)
+                    }
+                }
+            }
+        }
+        .navigationTitle("iCloud Sync")
+        .task { await checkStatuses() }
+        .task { await observeSyncEvents() }
+    }
+
+    private func manualSync() async {
+        isSyncing = true
+        syncMessage = nil
+        syncDirection = nil
+        syncProgress = 0
+        syncStatus = "Checking iCloud..."
+
+        let descriptor = FetchDescriptor<PhotoEntry>()
+        let localCount = (try? modelContext.fetch(descriptor))?.count ?? 0
+
+        do {
+            let cloudCount = try await fetchCloudRecordCount()
+
+            if cloudCount == 0 && localCount == 0 {
+                syncStatus = "No Data"
+                syncMessage = "No photos found locally or in iCloud."
+                isSyncing = false
+            } else if cloudCount == 0 {
+                startSync(direction: .push, expected: localCount, message: "No iCloud data found. Uploading \(localCount) entries...")
+            } else if localCount == 0 {
+                startSync(direction: .pull, expected: cloudCount, message: "Found \(cloudCount) entries in iCloud. Downloading...")
+            } else if localCount < cloudCount {
+                startSync(direction: .pull, expected: cloudCount, message: "iCloud has \(cloudCount) entries, local has \(localCount). Pulling...")
+            } else if localCount > cloudCount {
+                startSync(direction: .push, expected: localCount, message: "Local has \(localCount) entries, iCloud has \(cloudCount). Pushing...")
+            } else {
+                syncStatus = "Success"
+                syncMessage = "\(localCount) entries in sync across devices."
+                lastSuccessfulSyncTimestamp = Date.now.timeIntervalSince1970
+                isSyncing = false
+            }
+        } catch let error as CKError where error.code == .zoneNotFound || error.code == .serverRejectedRequest || error.code == .unknownItem {
+            if localCount > 0 {
+                startSync(direction: .push, expected: localCount, message: "No iCloud data found. Uploading \(localCount) entries...")
+            } else {
+                syncStatus = "No Data"
+                syncMessage = "No photos found locally or in iCloud."
+                isSyncing = false
+            }
+        } catch {
+            syncStatus = "Error"
+            syncMessage = error.localizedDescription
+            isSyncing = false
+        }
+    }
+
+    private func startSync(direction: SyncDirection, expected: Int, message: String) {
+        syncDirection = direction
+        expectedTotal = expected
+        syncProgress = 0
+        syncStatus = direction.label + "..."
+        syncMessage = message
+        try? modelContext.save()
+        progressTask?.cancel()
+        progressTask = Task { await monitorProgress() }
+    }
+
+    private func monitorProgress() async {
+        while isSyncing && !Task.isCancelled {
+            try? await Task.sleep(for: syncDirection == .push ? .seconds(3) : .seconds(1))
+            guard !Task.isCancelled else { break }
+
+            var current = 0
+            switch syncDirection {
+            case .pull:
+                let descriptor = FetchDescriptor<PhotoEntry>()
+                current = (try? modelContext.fetch(descriptor))?.count ?? 0
+            case .push:
+                current = (try? await fetchCloudRecordCount()) ?? 0
+            case .none:
+                break
+            }
+
+            guard expectedTotal > 0 else { continue }
+            let progress = min(Double(current) / Double(expectedTotal), 0.99)
+            withAnimation(.linear(duration: 0.3)) {
+                syncProgress = progress
+            }
+        }
+    }
+
+    private func finishSync(success: Bool, date: Date?, error: Error?) {
+        progressTask?.cancel()
+        progressTask = nil
+        withAnimation(.linear(duration: 0.3)) {
+            syncProgress = success ? 1.0 : syncProgress
+        }
+        if success {
+            syncStatus = "Success"
+            syncMessage = "Sync completed."
+            if let date { lastSuccessfulSyncTimestamp = date.timeIntervalSince1970 }
+        } else {
+            syncStatus = "Error"
+            syncMessage = error?.localizedDescription ?? "Sync failed."
+        }
+        Task {
+            try? await Task.sleep(for: .seconds(1))
+            isSyncing = false
+            syncDirection = nil
+        }
+    }
+
+    private func fetchCloudRecordCount() async throws -> Int {
+        let database = ckContainer.privateCloudDatabase
+        _ = try await database.recordZone(for: syncZoneID)
+
+        let query = CKQuery(
+            recordType: "CD_PhotoEntry",
+            predicate: NSPredicate(format: "CD_day != NIL")
+        )
+
+        var count = 0
+        let (firstBatch, firstCursor) = try await database.records(
+            matching: query,
+            inZoneWith: syncZoneID,
+            desiredKeys: []
+        )
+        count += firstBatch.count
+
+        var cursor = firstCursor
+        while let current = cursor {
+            let (batch, next) = try await database.records(
+                continuingMatchFrom: current,
+                desiredKeys: []
+            )
+            count += batch.count
+            cursor = next
+        }
+
+        return count
+    }
+
+    private func checkStatuses() async {
+        let monitor = NWPathMonitor()
+        networkNormal = await withCheckedContinuation { continuation in
+            monitor.pathUpdateHandler = { path in
+                continuation.resume(returning: path.status == .satisfied)
+                monitor.cancel()
+            }
+            monitor.start(queue: DispatchQueue(label: "net-check"))
+        }
+
+        iCloudConnected = FileManager.default.ubiquityIdentityToken != nil
+
+        if fellBackToLocal {
+            syncStatus = "Local Only"
+            return
+        }
+
+        do {
+            let status = try await ckContainer.accountStatus()
+            if status == .available {
+                syncStatus = "Success"
+                lastSuccessfulSyncTimestamp = Date.now.timeIntervalSince1970
+            } else {
+                syncStatus = "Unavailable"
+            }
+        } catch {
+            syncStatus = "Error"
+        }
+    }
+
+    private func observeSyncEvents() async {
+        guard !fellBackToLocal else { return }
+        let notifications = NotificationCenter.default.notifications(
+            named: NSPersistentCloudKitContainer.eventChangedNotification
+        )
+        for await notification in notifications {
+            guard let event = notification.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey]
+                    as? NSPersistentCloudKitContainer.Event else { continue }
+            if let endDate = event.endDate {
+                finishSync(success: event.succeeded, date: endDate, error: event.error)
+            }
+        }
     }
 }
 
