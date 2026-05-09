@@ -18,6 +18,7 @@ struct CalendarView: View {
     @State private var pastDaysMonthCount = 12
     @State private var pastDaysSelectedDate = Date()
     @State private var pastDaysPhotoItem: PhotosPickerItem?
+    @State private var pendingLocationImport: PendingPhotoImport?
 
     private let calendar = Calendar.current
 
@@ -98,18 +99,7 @@ struct CalendarView: View {
             guard let newItem else { return }
 
             Task {
-                do {
-                    guard let data = try await newItem.loadTransferable(type: Data.self) else {
-                        errorMessage = "Could not import that photo."
-                        selectedItem = nil
-                        return
-                    }
-
-                    try await photoStore.savePhotoData(data, for: Date(), in: modelContext)
-                } catch {
-                    errorMessage = "Could not import that photo."
-                }
-
+                await importPickedPhoto(newItem, for: Date())
                 selectedItem = nil
             }
         }
@@ -151,36 +141,33 @@ struct CalendarView: View {
                 }
             }
         }
+        .sheet(item: $pendingLocationImport, onDismiss: {
+            pendingLocationImport = nil
+        }) { pendingImport in
+            LocationPickerView { lat, lon, city, countryCode, countryName in
+                let location = PhotoLocationOverride(
+                    latitude: lat,
+                    longitude: lon,
+                    city: city,
+                    countryCode: countryCode,
+                    countryName: countryName
+                )
+                Task {
+                    await savePendingLocationImport(pendingImport, location: location)
+                }
+            }
+        }
         .onChange(of: addSheetPhotoItem) { _, newItem in
             guard let newItem else { return }
             Task {
-                do {
-                    guard let data = try await newItem.loadTransferable(type: Data.self) else {
-                        errorMessage = "Could not import that photo."
-                        addSheetPhotoItem = nil
-                        return
-                    }
-                    try await photoStore.savePhotoData(data, for: addSheetDate, in: modelContext)
-                    showingAddSheet = false
-                } catch {
-                    errorMessage = "Could not import that photo."
-                }
+                await importPickedPhoto(newItem, for: addSheetDate, dismissAddSheetOnSave: true)
                 addSheetPhotoItem = nil
             }
         }
         .onChange(of: pastDaysPhotoItem) { _, newItem in
             guard let newItem else { return }
             Task {
-                do {
-                    guard let data = try await newItem.loadTransferable(type: Data.self) else {
-                        errorMessage = "Could not import that photo."
-                        pastDaysPhotoItem = nil
-                        return
-                    }
-                    try await photoStore.savePhotoData(data, for: pastDaysSelectedDate, in: modelContext)
-                } catch {
-                    errorMessage = "Could not import that photo."
-                }
+                await importPickedPhoto(newItem, for: pastDaysSelectedDate)
                 pastDaysPhotoItem = nil
             }
         }
@@ -590,6 +577,49 @@ struct CalendarView: View {
         entries.contains(where: { calendar.isDate($0.day, inSameDayAs: date) })
     }
 
+    @MainActor
+    private func importPickedPhoto(
+        _ item: PhotosPickerItem,
+        for date: Date,
+        dismissAddSheetOnSave: Bool = false
+    ) async {
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else {
+                errorMessage = "Could not import that photo."
+                return
+            }
+
+            if photoStore.hasEmbeddedLocation(in: data) {
+                try await photoStore.savePhotoData(data, for: date, in: modelContext)
+                if dismissAddSheetOnSave {
+                    showingAddSheet = false
+                }
+            } else {
+                if dismissAddSheetOnSave {
+                    showingAddSheet = false
+                }
+                pendingLocationImport = PendingPhotoImport(data: data, date: date)
+            }
+        } catch {
+            errorMessage = "Could not import that photo."
+        }
+    }
+
+    @MainActor
+    private func savePendingLocationImport(_ importItem: PendingPhotoImport, location: PhotoLocationOverride) async {
+        do {
+            try await photoStore.savePhotoData(
+                importItem.data,
+                for: importItem.date,
+                in: modelContext,
+                locationOverride: location
+            )
+            pendingLocationImport = nil
+        } catch {
+            errorMessage = "Could not import that photo."
+        }
+    }
+
     private func monthDays(for month: Date) -> [CalendarDay] {
         guard
             let monthInterval = calendar.dateInterval(of: .month, for: month),
@@ -643,6 +673,12 @@ private struct LayoutMetrics {
 private struct CalendarDay: Identifiable {
     let id: Int
     let date: Date?
+}
+
+private struct PendingPhotoImport: Identifiable {
+    let id = UUID()
+    let data: Data
+    let date: Date
 }
 
 private enum PhotoGridItem: Identifiable {

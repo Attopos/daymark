@@ -15,6 +15,7 @@ struct PhotoDetailView: View {
     @State private var showingDeleteConfirmation = false
     @State private var showingPhotoEditor = false
     @State private var showingLocationPicker = false
+    @State private var pendingReplacementImport: PendingPhotoReplacement?
     @State private var errorMessage: String?
 
     var body: some View {
@@ -52,16 +53,7 @@ struct PhotoDetailView: View {
         .onChange(of: selectedItem) { _, newItem in
             guard let newItem else { return }
             Task {
-                do {
-                    guard let data = try await newItem.loadTransferable(type: Data.self) else {
-                        errorMessage = "Could not import that photo."
-                        selectedItem = nil
-                        return
-                    }
-                    try await photoStore.savePhotoData(data, for: entry.day, in: modelContext)
-                } catch {
-                    errorMessage = "Could not import that photo."
-                }
+                await importReplacementPhoto(newItem)
                 selectedItem = nil
             }
         }
@@ -106,6 +98,22 @@ struct PhotoDetailView: View {
                 entry.countryName = countryName
                 Task {
                     await locationLocalizer.localize(entry)
+                }
+            }
+        }
+        .sheet(item: $pendingReplacementImport, onDismiss: {
+            pendingReplacementImport = nil
+        }) { pendingImport in
+            LocationPickerView { lat, lon, city, countryCode, countryName in
+                let location = PhotoLocationOverride(
+                    latitude: lat,
+                    longitude: lon,
+                    city: city,
+                    countryCode: countryCode,
+                    countryName: countryName
+                )
+                Task {
+                    await savePendingReplacement(pendingImport, location: location)
                 }
             }
         }
@@ -200,10 +208,50 @@ struct PhotoDetailView: View {
         String(format: "%.4f, %.4f", lat, lon)
     }
 
+    @MainActor
+    private func importReplacementPhoto(_ item: PhotosPickerItem) async {
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else {
+                errorMessage = "Could not import that photo."
+                return
+            }
+
+            if photoStore.hasEmbeddedLocation(in: data) {
+                try await photoStore.savePhotoData(data, for: entry.day, in: modelContext)
+                await locationLocalizer.localize(entry)
+            } else {
+                pendingReplacementImport = PendingPhotoReplacement(data: data)
+            }
+        } catch {
+            errorMessage = "Could not import that photo."
+        }
+    }
+
+    @MainActor
+    private func savePendingReplacement(_ importItem: PendingPhotoReplacement, location: PhotoLocationOverride) async {
+        do {
+            try await photoStore.savePhotoData(
+                importItem.data,
+                for: entry.day,
+                in: modelContext,
+                locationOverride: location
+            )
+            await locationLocalizer.localize(entry)
+            pendingReplacementImport = nil
+        } catch {
+            errorMessage = "Could not import that photo."
+        }
+    }
+
     private var errorAlertBinding: Binding<Bool> {
         Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )
     }
+}
+
+private struct PendingPhotoReplacement: Identifiable {
+    let id = UUID()
+    let data: Data
 }
