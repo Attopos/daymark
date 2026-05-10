@@ -361,6 +361,19 @@ struct ICloudSyncDetailView: View {
         syncMessage = nil
         syncDirection = nil
         syncProgress = 0
+        syncStatus = "Verifying access..."
+
+        // Step 1: Test actual CloudKit write access
+        do {
+            try await verifyCloudKitWriteAccess()
+        } catch {
+            let detail = describeCloudKitError(error)
+            syncStatus = "Error"
+            syncMessage = detail
+            isSyncing = false
+            return
+        }
+
         syncStatus = "Checking iCloud..."
 
         let descriptor = FetchDescriptor<PhotoEntry>()
@@ -397,8 +410,40 @@ struct ICloudSyncDetailView: View {
             }
         } catch {
             syncStatus = "Error"
-            syncMessage = error.localizedDescription
+            syncMessage = describeCloudKitError(error)
             isSyncing = false
+        }
+    }
+
+    private func verifyCloudKitWriteAccess() async throws {
+        let database = ckContainer.privateCloudDatabase
+        let zone = CKRecordZone(zoneID: syncZoneID)
+        _ = try await database.save(zone)
+    }
+
+    private func describeCloudKitError(_ error: Error) -> String {
+        guard let ckError = error as? CKError else {
+            return error.localizedDescription
+        }
+        switch ckError.code {
+        case .notAuthenticated:
+            return "Not signed into iCloud. Go to Settings > Apple Account and sign in."
+        case .permissionFailure:
+            return "iCloud permission denied. Go to Settings > Apple Account > iCloud > Apps Using iCloud and enable Daymark."
+        case .missingEntitlement:
+            return "App is missing CloudKit entitlement. Rebuild from Xcode with iCloud capability enabled."
+        case .badContainer:
+            return "CloudKit container not found. Verify the container exists in Apple Developer portal."
+        case .quotaExceeded:
+            return "iCloud storage is full. Free up space in Settings > Apple Account > iCloud > Manage Storage."
+        case .networkUnavailable, .networkFailure:
+            return "Network unavailable. Check your internet connection."
+        case .serverRejectedRequest:
+            return "CloudKit rejected the request (error 15). The CloudKit schema may need to be deployed in the CloudKit Dashboard."
+        case .requestRateLimited:
+            return "Rate limited by iCloud. Try again in a few minutes."
+        default:
+            return "CloudKit error \(ckError.code.rawValue): \(ckError.localizedDescription)"
         }
     }
 
