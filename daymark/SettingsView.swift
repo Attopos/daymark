@@ -241,20 +241,19 @@ struct ICloudSyncDetailView: View {
 
     @State private var networkNormal = false
     @State private var iCloudConnected = false
-    @State private var syncStatus = "Checking..."
-    @State private var syncMessage: String?
     @State private var isSyncing = false
-    @State private var syncProgress: Double = 0
-    @State private var syncDirection: SyncDirection?
-    @State private var expectedTotal: Int = 0
-    @State private var progressTask: Task<Void, Never>?
-
-    private enum SyncDirection {
-        case push, pull
-        var label: String { self == .push ? "Pushing" : "Pulling" }
-        var icon: String { self == .push ? "arrow.up.circle.fill" : "arrow.down.circle.fill" }
-        var tint: Color { self == .push ? .blue : .green }
-    }
+    @State private var syncMessage: String?
+    @State private var syncActivities: [UUID: SyncActivity] = [:]
+    @State private var localPhotoCount: Int = 0
+    @State private var cloudPhotoCount: Int?
+    @State private var pollingTask: Task<Void, Never>?
+    @State private var cachedChangeToken: CKServerChangeToken?
+    @State private var cachedCloudIDs: Set<CKRecord.ID> = []
+    @State private var hasFullCloudSnapshot = false
+    #if DEBUG
+    @State private var isTestingCloudKit = false
+    @State private var cloudKitTestResult: String?
+    #endif
 
     private let ckContainer = CKContainer(identifier: "iCloud.com.shizhengcao.Daymark")
     private let syncZoneID = CKRecordZone.ID(
@@ -264,6 +263,38 @@ struct ICloudSyncDetailView: View {
 
     private var lastSyncDate: Date? {
         lastSuccessfulSyncTimestamp > 0 ? Date(timeIntervalSince1970: lastSuccessfulSyncTimestamp) : nil
+    }
+
+    private var activeActivities: [SyncActivity] {
+        syncActivities.values.filter(\.isActive).sorted { $0.startDate < $1.startDate }
+    }
+
+    private var recentActivities: [SyncActivity] {
+        Array(
+            syncActivities.values
+                .filter { !$0.isActive }
+                .sorted { ($0.endDate ?? .distantPast) > ($1.endDate ?? .distantPast) }
+                .prefix(6)
+        )
+    }
+
+    private var overallStatus: String {
+        if fellBackToLocal { return "Local Only" }
+        if !iCloudConnected { return "Not Connected" }
+        if !activeActivities.isEmpty { return "Syncing" }
+        if let latest = recentActivities.first {
+            return latest.succeeded ? "Up to Date" : "Error"
+        }
+        return "Idle"
+    }
+
+    private var statusColor: Color {
+        switch overallStatus {
+        case "Up to Date": return .green
+        case "Syncing": return .blue
+        case "Error", "Local Only", "Not Connected": return .red
+        default: return .secondary
+        }
     }
 
     var body: some View {
@@ -286,47 +317,126 @@ struct ICloudSyncDetailView: View {
                         Text(networkNormal ? "Normal" : "Unavailable")
                             .foregroundStyle(networkNormal ? Color.primary : Color.red)
                     }
-
                     LabeledContent("iCloud") {
                         Text(iCloudConnected ? "Connected" : "Not Signed In")
                             .foregroundStyle(iCloudConnected ? Color.primary : Color.red)
                     }
-
-                    LabeledContent("Syncing Status") {
-                        Text(syncStatus)
-                            .foregroundStyle(syncStatus == "Success" ? .green : .secondary)
+                    LabeledContent("Status") {
+                        HStack(spacing: 6) {
+                            if !activeActivities.isEmpty {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text(overallStatus)
+                                .foregroundStyle(statusColor)
+                        }
                     }
-
-                    LabeledContent("Recent Sync Date") {
+                    LabeledContent("Last Sync") {
                         if let lastSyncDate {
-                            Text(lastSyncDate.formatted(.dateTime.year().month().day().hour().minute().second()))
+                            Text(lastSyncDate.formatted(.dateTime.month().day().hour().minute().second()))
                         } else {
                             Text("—")
                         }
                     }
                 }
 
-                if isSyncing, let direction = syncDirection {
-                    Section {
-                        VStack(spacing: 10) {
-                            HStack {
-                                Image(systemName: direction.icon)
-                                    .font(.system(size: 18))
-                                    .foregroundStyle(direction.tint)
-                                Text(direction.label)
-                                    .font(.subheadline.weight(.medium))
-                                Spacer()
-                                Text("\(Int(syncProgress * 100))%")
-                                    .font(.subheadline.weight(.bold))
-                                    .monospacedDigit()
-                                    .foregroundStyle(direction.tint)
-                            }
-                            ProgressView(value: syncProgress)
-                                .tint(direction.tint)
+                if localPhotoCount > 0 || cloudPhotoCount != nil {
+                    Section("Sync Progress") {
+                        LabeledContent("This Device") {
+                            Text("\(localPhotoCount) photos")
+                                .contentTransition(.numericText())
                         }
-                    } footer: {
-                        if let syncMessage {
-                            Text(syncMessage)
+
+                        if let cloudCount = cloudPhotoCount {
+                            LabeledContent("iCloud") {
+                                Text("\(cloudCount) photos")
+                                    .contentTransition(.numericText())
+                            }
+
+                            if cloudCount != localPhotoCount {
+                                let total = max(localPhotoCount, cloudCount)
+                                let synced = min(localPhotoCount, cloudCount)
+                                let remaining = total - synced
+
+                                ProgressView(value: Double(synced), total: Double(max(total, 1)))
+                                    .tint(.blue)
+
+                                Text(localPhotoCount > cloudCount
+                                     ? "\(remaining) photos waiting to upload"
+                                     : "\(remaining) photos waiting to download")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else if cloudCount > 0 {
+                                Label("All photos synced", systemImage: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                    .font(.subheadline)
+                            }
+                        } else if !activeActivities.isEmpty {
+                            HStack {
+                                Text("Checking iCloud...")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
+                    }
+                }
+
+                if !activeActivities.isEmpty {
+                    Section("Active") {
+                        ForEach(activeActivities) { activity in
+                            HStack(spacing: 10) {
+                                Image(systemName: activity.kind.icon)
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(activity.kind.tint)
+                                    .frame(width: 24)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(activity.kind.label)
+                                        .font(.subheadline.weight(.medium))
+                                    Text(activity.startDate, style: .relative)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                ProgressView()
+                            }
+                        }
+                    }
+                }
+
+                if !recentActivities.isEmpty {
+                    Section("Recent") {
+                        ForEach(recentActivities) { activity in
+                            HStack(spacing: 10) {
+                                Image(systemName: activity.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(activity.succeeded ? .green : .red)
+                                    .frame(width: 24)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 4) {
+                                        Text(activity.kind.label)
+                                            .font(.subheadline)
+                                        Image(systemName: activity.kind.icon)
+                                            .font(.caption2)
+                                            .foregroundStyle(activity.kind.tint)
+                                    }
+                                    if let error = activity.errorMessage {
+                                        Text(error)
+                                            .font(.caption2)
+                                            .foregroundStyle(.red)
+                                            .lineLimit(2)
+                                    }
+                                }
+                                Spacer()
+                                if let duration = activity.duration {
+                                    Text(String(format: "%.1fs", duration))
+                                        .font(.caption)
+                                        .monospacedDigit()
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
                     }
                 }
@@ -338,87 +448,88 @@ struct ICloudSyncDetailView: View {
                         HStack {
                             Text("Sync Now")
                             Spacer()
-                            if isSyncing && syncDirection == nil {
+                            if isSyncing {
                                 ProgressView()
                             }
                         }
                     }
                     .disabled(isSyncing || fellBackToLocal || !iCloudConnected)
                 } footer: {
-                    if !isSyncing, let syncMessage {
+                    if let syncMessage {
                         Text(syncMessage)
                     }
                 }
+
+                #if DEBUG
+                Section("Debug: Raw CloudKit Test") {
+                    Button {
+                        Task { await createCloudKitTestRecord() }
+                    } label: {
+                        HStack {
+                            Text("Create CloudKit Test Record")
+                            Spacer()
+                            if isTestingCloudKit {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isTestingCloudKit)
+
+                    if let cloudKitTestResult {
+                        Text(cloudKitTestResult)
+                            .font(.caption)
+                            .foregroundStyle(cloudKitTestResult.hasPrefix("✅") ? .green : .red)
+                            .textSelection(.enabled)
+                    }
+
+                    Button {
+                        Task { await checkSwiftDataZoneStatus() }
+                    } label: {
+                        Text("Check SwiftData Zone & Schema")
+                    }
+                    .disabled(isTestingCloudKit)
+                }
+                #endif
             }
         }
         .navigationTitle("iCloud Sync")
         .task { await checkStatuses() }
         .task { await observeSyncEvents() }
+        .task { await refreshCounts() }
+        .onDisappear { stopProgressPolling() }
     }
 
     private func manualSync() async {
         isSyncing = true
         syncMessage = nil
-        syncDirection = nil
-        syncProgress = 0
-        syncStatus = "Verifying access..."
 
-        // Step 1: Test actual CloudKit write access
         do {
             try await verifyCloudKitWriteAccess()
         } catch {
-            let detail = describeCloudKitError(error)
-            syncStatus = "Error"
-            syncMessage = detail
+            syncMessage = describeCloudKitError(error)
             isSyncing = false
             return
         }
 
-        syncStatus = "Checking iCloud..."
+        refreshLocalCount()
+        try? modelContext.save()
+        syncMessage = "Syncing \(localPhotoCount) photos..."
+        startProgressPolling()
 
-        let descriptor = FetchDescriptor<PhotoEntry>()
-        let localCount = (try? modelContext.fetch(descriptor))?.count ?? 0
-
-        do {
-            let cloudCount = try await fetchCloudRecordCount()
-
-            if cloudCount == 0 && localCount == 0 {
-                syncStatus = "No Data"
-                syncMessage = "No photos found locally or in iCloud."
+        Task {
+            try? await Task.sleep(for: .seconds(30))
+            if isSyncing {
                 isSyncing = false
-            } else if cloudCount == 0 {
-                startSync(direction: .push, expected: localCount, message: "No iCloud data found. Uploading \(localCount) entries...")
-            } else if localCount == 0 {
-                startSync(direction: .pull, expected: cloudCount, message: "Found \(cloudCount) entries in iCloud. Downloading...")
-            } else if localCount < cloudCount {
-                startSync(direction: .pull, expected: cloudCount, message: "iCloud has \(cloudCount) entries, local has \(localCount). Pulling...")
-            } else if localCount > cloudCount {
-                startSync(direction: .push, expected: localCount, message: "Local has \(localCount) entries, iCloud has \(cloudCount). Pushing...")
-            } else {
-                syncStatus = "Success"
-                syncMessage = "\(localCount) entries in sync across devices."
-                lastSuccessfulSyncTimestamp = Date.now.timeIntervalSince1970
-                isSyncing = false
+                if syncMessage?.starts(with: "Syncing") == true {
+                    syncMessage = "Sync triggered. Photos will continue syncing in the background."
+                }
             }
-        } catch let error as CKError where error.code == .zoneNotFound || error.code == .serverRejectedRequest || error.code == .unknownItem {
-            if localCount > 0 {
-                startSync(direction: .push, expected: localCount, message: "No iCloud data found. Uploading \(localCount) entries...")
-            } else {
-                syncStatus = "No Data"
-                syncMessage = "No photos found locally or in iCloud."
-                isSyncing = false
-            }
-        } catch {
-            syncStatus = "Error"
-            syncMessage = describeCloudKitError(error)
-            isSyncing = false
         }
     }
 
     private func verifyCloudKitWriteAccess() async throws {
         let database = ckContainer.privateCloudDatabase
-        let zone = CKRecordZone(zoneID: syncZoneID)
-        _ = try await database.save(zone)
+        _ = try await database.recordZone(for: syncZoneID)
     }
 
     private func describeCloudKitError(_ error: Error) -> String {
@@ -447,92 +558,6 @@ struct ICloudSyncDetailView: View {
         }
     }
 
-    private func startSync(direction: SyncDirection, expected: Int, message: String) {
-        syncDirection = direction
-        expectedTotal = expected
-        syncProgress = 0
-        syncStatus = direction.label + "..."
-        syncMessage = message
-        try? modelContext.save()
-        progressTask?.cancel()
-        progressTask = Task { await monitorProgress() }
-    }
-
-    private func monitorProgress() async {
-        while isSyncing && !Task.isCancelled {
-            try? await Task.sleep(for: syncDirection == .push ? .seconds(3) : .seconds(1))
-            guard !Task.isCancelled else { break }
-
-            var current = 0
-            switch syncDirection {
-            case .pull:
-                let descriptor = FetchDescriptor<PhotoEntry>()
-                current = (try? modelContext.fetch(descriptor))?.count ?? 0
-            case .push:
-                current = (try? await fetchCloudRecordCount()) ?? 0
-            case .none:
-                break
-            }
-
-            guard expectedTotal > 0 else { continue }
-            let progress = min(Double(current) / Double(expectedTotal), 0.99)
-            withAnimation(.linear(duration: 0.3)) {
-                syncProgress = progress
-            }
-        }
-    }
-
-    private func finishSync(success: Bool, date: Date?, error: Error?) {
-        progressTask?.cancel()
-        progressTask = nil
-        withAnimation(.linear(duration: 0.3)) {
-            syncProgress = success ? 1.0 : syncProgress
-        }
-        if success {
-            syncStatus = "Success"
-            syncMessage = "Sync completed."
-            if let date { lastSuccessfulSyncTimestamp = date.timeIntervalSince1970 }
-        } else {
-            syncStatus = "Error"
-            syncMessage = error?.localizedDescription ?? "Sync failed."
-        }
-        Task {
-            try? await Task.sleep(for: .seconds(1))
-            isSyncing = false
-            syncDirection = nil
-        }
-    }
-
-    private func fetchCloudRecordCount() async throws -> Int {
-        let database = ckContainer.privateCloudDatabase
-        _ = try await database.recordZone(for: syncZoneID)
-
-        let query = CKQuery(
-            recordType: "CD_PhotoEntry",
-            predicate: NSPredicate(format: "CD_day != NIL")
-        )
-
-        var count = 0
-        let (firstBatch, firstCursor) = try await database.records(
-            matching: query,
-            inZoneWith: syncZoneID,
-            desiredKeys: []
-        )
-        count += firstBatch.count
-
-        var cursor = firstCursor
-        while let current = cursor {
-            let (batch, next) = try await database.records(
-                continuingMatchFrom: current,
-                desiredKeys: []
-            )
-            count += batch.count
-            cursor = next
-        }
-
-        return count
-    }
-
     private func checkStatuses() async {
         let monitor = NWPathMonitor()
         networkNormal = await withCheckedContinuation { continuation in
@@ -542,25 +567,101 @@ struct ICloudSyncDetailView: View {
             }
             monitor.start(queue: DispatchQueue(label: "net-check"))
         }
-
         iCloudConnected = FileManager.default.ubiquityIdentityToken != nil
+    }
 
-        if fellBackToLocal {
-            syncStatus = "Local Only"
-            return
+    private func refreshLocalCount() {
+        let descriptor = FetchDescriptor<PhotoEntry>()
+        withAnimation(.easeInOut(duration: 0.3)) {
+            localPhotoCount = (try? modelContext.fetchCount(descriptor)) ?? 0
         }
+    }
 
+    private func refreshCounts() async {
+        refreshLocalCount()
+        let count = await fetchCloudPhotoCount()
+        withAnimation(.easeInOut(duration: 0.3)) {
+            cloudPhotoCount = count
+        }
+    }
+
+    private func fetchCloudPhotoCount() async -> Int? {
+        let database = ckContainer.privateCloudDatabase
         do {
-            let status = try await ckContainer.accountStatus()
-            if status == .available {
-                syncStatus = "Success"
-                lastSuccessfulSyncTimestamp = Date.now.timeIntervalSince1970
-            } else {
-                syncStatus = "Unavailable"
+            let startToken: CKServerChangeToken? = hasFullCloudSnapshot ? cachedChangeToken : nil
+            var ids = hasFullCloudSnapshot ? cachedCloudIDs : Set<CKRecord.ID>()
+            var token = startToken
+            var hasMore = true
+
+            while hasMore {
+                let changes = try await database.recordZoneChanges(
+                    inZoneWith: syncZoneID,
+                    since: token,
+                    desiredKeys: []
+                )
+
+                for (recordID, result) in changes.modificationResultsByID {
+                    if case .success(let modification) = result,
+                       modification.record.recordType == "CD_PhotoEntry" {
+                        ids.insert(recordID)
+                    }
+                }
+
+                for deletion in changes.deletions where deletion.recordType == "CD_PhotoEntry" {
+                    ids.remove(deletion.recordID)
+                }
+
+                token = changes.changeToken
+                hasMore = changes.moreComing
             }
+
+            cachedChangeToken = token
+            cachedCloudIDs = ids
+            hasFullCloudSnapshot = true
+            return ids.count
         } catch {
-            syncStatus = "Error"
+            return nil
         }
+    }
+
+    private func startProgressPolling() {
+        guard pollingTask == nil else { return }
+        pollingTask = Task {
+            var unchangedCycles = 0
+            var lastSeenCloud: Int?
+            var lastSeenLocal: Int?
+
+            while !Task.isCancelled {
+                refreshLocalCount()
+                try? await Task.sleep(for: .seconds(3))
+                if Task.isCancelled { break }
+                let count = await fetchCloudPhotoCount()
+                if Task.isCancelled { break }
+
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    cloudPhotoCount = count
+                }
+
+                if count == lastSeenCloud && localPhotoCount == lastSeenLocal {
+                    unchangedCycles += 1
+                } else {
+                    unchangedCycles = 0
+                }
+                lastSeenCloud = count
+                lastSeenLocal = localPhotoCount
+
+                if unchangedCycles >= 6 && count == localPhotoCount {
+                    break
+                }
+
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
+    }
+
+    private func stopProgressPolling() {
+        pollingTask?.cancel()
+        pollingTask = nil
     }
 
     private func observeSyncEvents() async {
@@ -571,8 +672,191 @@ struct ICloudSyncDetailView: View {
         for await notification in notifications {
             guard let event = notification.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey]
                     as? NSPersistentCloudKitContainer.Event else { continue }
-            if let endDate = event.endDate {
-                finishSync(success: event.succeeded, date: endDate, error: event.error)
+
+            let kind: SyncActivity.Kind
+            if event.type == .export {
+                kind = .exporting
+            } else if event.type == .setup {
+                kind = .setup
+            } else {
+                kind = .importing
+            }
+
+            let isStarting = event.endDate == nil
+
+            withAnimation(.easeInOut(duration: 0.3)) {
+                if isStarting {
+                    syncActivities[event.identifier] = SyncActivity(
+                        id: event.identifier,
+                        kind: kind,
+                        startDate: event.startDate
+                    )
+                } else {
+                    if syncActivities[event.identifier] != nil {
+                        syncActivities[event.identifier]?.endDate = event.endDate
+                        syncActivities[event.identifier]?.succeeded = event.succeeded
+                        syncActivities[event.identifier]?.errorMessage = event.error?.localizedDescription
+                    } else {
+                        var activity = SyncActivity(id: event.identifier, kind: kind, startDate: event.startDate)
+                        activity.endDate = event.endDate
+                        activity.succeeded = event.succeeded
+                        activity.errorMessage = event.error?.localizedDescription
+                        syncActivities[event.identifier] = activity
+                    }
+                }
+            }
+
+            if isStarting {
+                startProgressPolling()
+            } else {
+                if event.succeeded, let endDate = event.endDate {
+                    lastSuccessfulSyncTimestamp = endDate.timeIntervalSince1970
+                }
+
+                if isSyncing && activeActivities.isEmpty {
+                    isSyncing = false
+                    syncMessage = event.succeeded ? "Sync completed." : (event.error?.localizedDescription ?? "Sync failed.")
+                }
+
+                if activeActivities.isEmpty {
+                    stopProgressPolling()
+                    await refreshCounts()
+                }
+            }
+
+            let completed = syncActivities.values.filter { !$0.isActive }
+            if completed.count > 20 {
+                let sorted = completed.sorted { ($0.endDate ?? .distantPast) < ($1.endDate ?? .distantPast) }
+                for activity in sorted.prefix(completed.count - 20) {
+                    syncActivities.removeValue(forKey: activity.id)
+                }
+            }
+        }
+    }
+
+    #if DEBUG
+    private func createCloudKitTestRecord() async {
+        isTestingCloudKit = true
+        cloudKitTestResult = nil
+
+        let container = CKContainer(identifier: "iCloud.com.shizhengcao.Daymark")
+        let database = container.privateCloudDatabase
+
+        let record = CKRecord(recordType: "DaymarkSyncTest")
+        record["title"] = "Test from Daymark" as CKRecordValue
+        record["createdAt"] = Date() as CKRecordValue
+
+        do {
+            let saved = try await database.save(record)
+            cloudKitTestResult = "✅ Record saved: \(saved.recordID.recordName)\nGo to CloudKit Console → Development → Schema → Record Types and look for 'DaymarkSyncTest'."
+            print("[CloudKit Debug] Test record saved successfully: \(saved.recordID)")
+        } catch {
+            cloudKitTestResult = "❌ \(formatCloudKitDebugError(error))"
+            print("[CloudKit Debug] Test record save FAILED:\n\(formatCloudKitDebugError(error))")
+        }
+
+        isTestingCloudKit = false
+    }
+
+    private func checkSwiftDataZoneStatus() async {
+        isTestingCloudKit = true
+        cloudKitTestResult = nil
+
+        let container = CKContainer(identifier: "iCloud.com.shizhengcao.Daymark")
+        let database = container.privateCloudDatabase
+        var lines: [String] = []
+
+        do {
+            let status = try await container.accountStatus()
+            lines.append("Account: \(status == .available ? "available" : "status \(status.rawValue)")")
+        } catch {
+            lines.append("Account check failed: \(error.localizedDescription)")
+        }
+
+        lines.append("Fallback to local: \(fellBackToLocal)")
+
+        do {
+            let zone = try await database.recordZone(for: syncZoneID)
+            lines.append("✅ SwiftData zone exists: \(zone.zoneID.zoneName)")
+        } catch let error as CKError where error.code == .zoneNotFound {
+            lines.append("❌ SwiftData zone NOT found (com.apple.coredata.cloudkit.zone). Schema was never exported.")
+        } catch {
+            lines.append("❌ Zone check error: \(formatCloudKitDebugError(error))")
+        }
+
+        do {
+            let query = CKQuery(recordType: "CD_PhotoEntry", predicate: NSPredicate(value: true))
+            let (results, _) = try await database.records(matching: query, inZoneWith: syncZoneID, desiredKeys: [], resultsLimit: 1)
+            lines.append("✅ CD_PhotoEntry record type exists, \(results.count) result(s) in first batch")
+        } catch let error as CKError where error.code == .unknownItem {
+            lines.append("❌ CD_PhotoEntry record type does NOT exist in CloudKit schema")
+        } catch {
+            lines.append("❌ Query error: \(error.localizedDescription)")
+        }
+
+        cloudKitTestResult = lines.joined(separator: "\n")
+        isTestingCloudKit = false
+    }
+
+    private func formatCloudKitDebugError(_ error: Error) -> String {
+        guard let ckError = error as? CKError else {
+            return "Non-CKError: \(error)"
+        }
+        var parts: [String] = []
+        parts.append("CKError code \(ckError.code.rawValue)")
+        parts.append(ckError.localizedDescription)
+        if let underlying = ckError.userInfo[NSUnderlyingErrorKey] as? Error {
+            parts.append("Underlying: \(underlying)")
+        }
+        if let partial = ckError.partialErrorsByItemID {
+            for (key, value) in partial {
+                parts.append("Partial[\(key)]: \(value)")
+            }
+        }
+        if let retry = ckError.retryAfterSeconds {
+            parts.append("Retry after: \(retry)s")
+        }
+        return parts.joined(separator: "\n")
+    }
+    #endif
+}
+
+private struct SyncActivity: Identifiable {
+    let id: UUID
+    let kind: Kind
+    let startDate: Date
+    var endDate: Date?
+    var succeeded: Bool = false
+    var errorMessage: String?
+
+    var isActive: Bool { endDate == nil }
+    var duration: TimeInterval? {
+        guard let endDate else { return nil }
+        return endDate.timeIntervalSince(startDate)
+    }
+
+    enum Kind {
+        case setup, importing, exporting
+
+        var label: String {
+            switch self {
+            case .setup: return "Setup"
+            case .importing: return "Downloading"
+            case .exporting: return "Uploading"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .setup: return "gearshape.circle.fill"
+            case .importing: return "arrow.down.circle.fill"
+            case .exporting: return "arrow.up.circle.fill"
+            }
+        }
+        var tint: Color {
+            switch self {
+            case .setup: return .orange
+            case .importing: return .green
+            case .exporting: return .blue
             }
         }
     }

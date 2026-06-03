@@ -10,24 +10,24 @@ daymark/
 ├── daymark/
 │   ├── Assets.xcassets
 │   ├── AuthManager.swift
-│   ├── CalendarView.swift
+│   ├── CalendarView.swift                    # Displays entries by date in a calendar-style interface.
 │   ├── ContentView.swift
 │   ├── daymark.entitlements
 │   ├── daymarkApp.swift
 │   ├── Info.plist
 │   ├── LocationLocalizer.swift
 │   ├── LocationPickerView.swift
-│   ├── MapView.swift
+│   ├── MapView.swift                         # Displays photo entries geographically using location metadata.
 │   ├── NotificationManager.swift
-│   ├── PhotoDetailView.swift
-│   ├── PhotoEditView.swift
-│   ├── PhotoEntry.swift
-│   ├── PhotoStore.swift
+│   ├── PhotoDetailView.swift                 # Shows the full details for a single photo entry.
+│   ├── PhotoEditView.swift                   # Handles creating or editing a photo entry.
+│   ├── PhotoEntry.swift                      # Defines the core photo entry model.
+│   ├── PhotoStore.swift                      # Handles storing, loading, updating, and deleting Photo​Entry values.
 │   ├── PROJECT_MAP.md
-│   ├── SearchView.swift
+│   ├── SearchView.swift                      # Provides search over saved photo entries.
 │   ├── SettingsView.swift
 │   ├── SignInAvatarButton.swift
-│   └── TimelineView.swift
+│   └── TimelineView.swift                    # Displays photo entries chronologically.
 ├── daymarkTests/
 │   └── daymarkTests.swift
 ├── daymarkUITests/

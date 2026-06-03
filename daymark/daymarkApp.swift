@@ -17,9 +17,10 @@ struct DaymarkApp: App {
         )
 
         do {
+            UserDefaults.standard.set(false, forKey: "cloudKitFallbackToLocal")
             return try ModelContainer(for: schema, configurations: [config])
         } catch {
-            print("CloudKit ModelContainer failed, falling back to local storage: \(error.localizedDescription)")
+            print("CloudKit ModelContainer failed, falling back to local storage: \(error)")
             UserDefaults.standard.set(true, forKey: "cloudKitFallbackToLocal")
             let localConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false, cloudKitDatabase: .none)
             do {
