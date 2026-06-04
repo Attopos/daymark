@@ -2,6 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Daymark uses the camera so you can take photos for your daily entries.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Daymark uses your location to show your position on the map and attach locations to photo entries.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Daymark uses your photo library so you can choose photos to create and update your daily entries.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
