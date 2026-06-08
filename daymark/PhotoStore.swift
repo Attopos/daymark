@@ -2,6 +2,7 @@ import Foundation
 import ImageIO
 import CoreTransferable
 import CoreLocation
+import CryptoKit
 import MapKit
 import SwiftData
 import UniformTypeIdentifiers
@@ -44,6 +45,7 @@ struct PhotoStore {
     }
     private let calendar = Calendar.current
     private let fileManager = FileManager.default
+    private let originalFileStore: OriginalPhotoFileStore
     private let exifDateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -56,16 +58,32 @@ struct PhotoStore {
         static let compressionQuality = 0.82
     }
 
+    init(originalsDirectoryURL: URL? = nil) {
+        originalFileStore = OriginalPhotoFileStore(directoryURL: originalsDirectoryURL)
+    }
+
     private func normalizedDay(for date: Date) -> Date {
         calendar.startOfDay(for: date)
     }
 
     func image(for entry: PhotoEntry) -> UIImage? {
-        image(from: entry.imageData, cache: imageCache, cacheKey: cacheKey(for: entry, suffix: "full"))
+        image(from: originalData(for: entry), cache: imageCache, cacheKey: cacheKey(for: entry, suffix: "full"))
     }
 
     func thumbnail(for entry: PhotoEntry) -> UIImage? {
-        image(from: entry.thumbnailData ?? entry.imageData, cache: thumbnailCache, cacheKey: cacheKey(for: entry, suffix: "thumb"))
+        image(
+            from: entry.thumbnailData ?? originalData(for: entry),
+            cache: thumbnailCache,
+            cacheKey: cacheKey(for: entry, suffix: "thumb")
+        )
+    }
+
+    func originalData(for entry: PhotoEntry) -> Data? {
+        if let filename = entry.localOriginalFilename,
+           let data = try? originalFileStore.read(filename: filename) {
+            return data
+        }
+        return entry.imageData
     }
 
     func makeBackupExportItem(from entries: [PhotoEntry]) throws -> DaymarkBackupExportItem {
@@ -74,7 +92,7 @@ struct PhotoStore {
                 id: entry.id,
                 day: entry.day,
                 captureDate: entry.captureDate,
-                imageFilename: entry.imageData != nil ? "\(entry.id).jpg" : nil,
+                imageFilename: originalData(for: entry) != nil ? "\(entry.id).jpg" : nil,
                 latitude: entry.latitude,
                 longitude: entry.longitude,
                 timezone: entry.timezone,
@@ -90,7 +108,7 @@ struct PhotoStore {
 
         var zipEntries = [ZipArchive.Entry(path: "entries.json", data: jsonData)]
         for entry in entries {
-            guard let imageData = entry.imageData else { continue }
+            guard let imageData = originalData(for: entry) else { continue }
             zipEntries.append(ZipArchive.Entry(path: "images/\(entry.id).jpg", data: imageData))
         }
 
@@ -119,16 +137,28 @@ struct PhotoStore {
         let captureDate = captureDate(from: data) ?? date
         let thumbnailData = try thumbnailData(from: data)
         let entry = try existingEntry(for: normalizedDate, in: modelContext) ?? PhotoEntry(day: normalizedDate)
+        let oldImageData = entry.imageData
+        let oldThumbnailData = entry.thumbnailData
+        let oldImageFilename = entry.imageFilename
+        let oldOriginalFilename = entry.localOriginalFilename
+        let oldOriginalByteCount = entry.originalByteCount
+        let oldOriginalContentHash = entry.originalContentHash
+        let oldOriginalSyncState = entry.originalSyncState
+        let storedOriginal = try originalFileStore.write(data, ownerID: entry.id)
 
         if entry.modelContext == nil {
             modelContext.insert(entry)
         }
 
         entry.day = normalizedDate
-        entry.imageData = data
+        entry.imageData = nil
         entry.thumbnailData = thumbnailData
         entry.captureDate = captureDate
         entry.imageFilename = nil
+        entry.localOriginalFilename = storedOriginal.filename
+        entry.originalByteCount = storedOriginal.byteCount
+        entry.originalContentHash = storedOriginal.contentHash
+        entry.originalSyncState = .localOnly
         entry.latitude = location?.latitude
         entry.longitude = location?.longitude
         entry.timezone = TimeZone.current.identifier
@@ -148,7 +178,25 @@ struct PhotoStore {
             entry.city = nil
         }
 
-        try modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            if oldOriginalFilename != storedOriginal.filename {
+                try? originalFileStore.remove(filename: storedOriginal.filename)
+            }
+            entry.imageData = oldImageData
+            entry.thumbnailData = oldThumbnailData
+            entry.imageFilename = oldImageFilename
+            entry.localOriginalFilename = oldOriginalFilename
+            entry.originalByteCount = oldOriginalByteCount
+            entry.originalContentHash = oldOriginalContentHash
+            entry.originalSyncState = oldOriginalSyncState
+            throw error
+        }
+
+        if oldOriginalFilename != storedOriginal.filename {
+            try? originalFileStore.remove(filename: oldOriginalFilename)
+        }
         invalidateCaches(for: entry)
     }
 
@@ -157,19 +205,53 @@ struct PhotoStore {
         guard let imageData = normalizedImage.jpegData(compressionQuality: 0.92) else {
             throw PhotoStoreError.invalidImageData
         }
+        let newThumbnailData = try thumbnailData(from: imageData)
 
-        entry.imageData = imageData
-        entry.thumbnailData = try thumbnailData(from: imageData)
+        let oldImageData = entry.imageData
+        let oldThumbnailData = entry.thumbnailData
+        let oldImageFilename = entry.imageFilename
+        let oldOriginalFilename = entry.localOriginalFilename
+        let oldOriginalByteCount = entry.originalByteCount
+        let oldOriginalContentHash = entry.originalContentHash
+        let oldOriginalSyncState = entry.originalSyncState
+        let storedOriginal = try originalFileStore.write(imageData, ownerID: entry.id)
+
+        entry.imageData = nil
+        entry.thumbnailData = newThumbnailData
         entry.imageFilename = nil
+        entry.localOriginalFilename = storedOriginal.filename
+        entry.originalByteCount = storedOriginal.byteCount
+        entry.originalContentHash = storedOriginal.contentHash
+        entry.originalSyncState = .localOnly
 
-        try modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            if oldOriginalFilename != storedOriginal.filename {
+                try? originalFileStore.remove(filename: storedOriginal.filename)
+            }
+            entry.imageData = oldImageData
+            entry.thumbnailData = oldThumbnailData
+            entry.imageFilename = oldImageFilename
+            entry.localOriginalFilename = oldOriginalFilename
+            entry.originalByteCount = oldOriginalByteCount
+            entry.originalContentHash = oldOriginalContentHash
+            entry.originalSyncState = oldOriginalSyncState
+            throw error
+        }
+
+        if oldOriginalFilename != storedOriginal.filename {
+            try? originalFileStore.remove(filename: oldOriginalFilename)
+        }
         invalidateCaches(for: entry)
     }
 
     func deleteEntry(_ entry: PhotoEntry, in modelContext: ModelContext) throws {
+        let originalFilename = entry.localOriginalFilename
         invalidateCaches(for: entry)
         modelContext.delete(entry)
         try modelContext.save()
+        try? originalFileStore.remove(filename: originalFilename)
     }
 
     func parseBackup(from url: URL) throws -> BackupContents {
@@ -216,46 +298,76 @@ struct PhotoStore {
     }
 
     func importBackup(from contents: BackupContents, mode: BackupImportMode, into modelContext: ModelContext) throws {
-        for backupEntry in contents.payload.entries {
-            let normalizedDate = normalizedDay(for: backupEntry.day)
-            let existing = try existingEntry(for: normalizedDate, in: modelContext)
+        var replacedOriginalFilenames: [String] = []
 
-            if mode == .merge && existing != nil {
-                continue
+        do {
+            for backupEntry in contents.payload.entries {
+                let normalizedDate = normalizedDay(for: backupEntry.day)
+                let existing = try existingEntry(for: normalizedDate, in: modelContext)
+
+                if mode == .merge && existing != nil {
+                    continue
+                }
+
+                let entry = existing ?? PhotoEntry(day: normalizedDate)
+                if entry.modelContext == nil {
+                    modelContext.insert(entry)
+                }
+
+                if let backupID = backupEntry.id {
+                    entry.id = backupID
+                }
+                entry.day = normalizedDate
+                entry.captureDate = backupEntry.captureDate
+                entry.imageFilename = nil
+                entry.latitude = backupEntry.latitude
+                entry.longitude = backupEntry.longitude
+                entry.timezone = backupEntry.timezone ?? entry.timezone
+                entry.countryCode = backupEntry.countryCode
+                entry.countryName = backupEntry.countryName
+                entry.city = backupEntry.city
+                entry.caption = backupEntry.caption
+
+                if let filename = backupEntry.imageFilename,
+                   let imageData = contents.imageFiles[filename] {
+                    let storedOriginal = try originalFileStore.write(imageData, ownerID: entry.id)
+                    trackReplacement(
+                        oldFilename: entry.localOriginalFilename,
+                        newFilename: storedOriginal.filename,
+                        replaced: &replacedOriginalFilenames
+                    )
+                    entry.imageData = nil
+                    entry.thumbnailData = try? thumbnailData(from: imageData)
+                    entry.localOriginalFilename = storedOriginal.filename
+                    entry.originalByteCount = storedOriginal.byteCount
+                    entry.originalContentHash = storedOriginal.contentHash
+                    entry.originalSyncState = .localOnly
+                } else if let legacyImageData = backupEntry.legacyImageData {
+                    let storedOriginal = try originalFileStore.write(legacyImageData, ownerID: entry.id)
+                    trackReplacement(
+                        oldFilename: entry.localOriginalFilename,
+                        newFilename: storedOriginal.filename,
+                        replaced: &replacedOriginalFilenames
+                    )
+                    entry.imageData = nil
+                    entry.thumbnailData = backupEntry.legacyThumbnailData ?? (try? thumbnailData(from: legacyImageData))
+                    entry.localOriginalFilename = storedOriginal.filename
+                    entry.originalByteCount = storedOriginal.byteCount
+                    entry.originalContentHash = storedOriginal.contentHash
+                    entry.originalSyncState = .localOnly
+                }
+
+                invalidateCaches(for: entry)
             }
 
-            let entry = existing ?? PhotoEntry(day: normalizedDate)
-            if entry.modelContext == nil {
-                modelContext.insert(entry)
-            }
-
-            if let backupID = backupEntry.id {
-                entry.id = backupID
-            }
-            entry.day = normalizedDate
-            entry.captureDate = backupEntry.captureDate
-            entry.imageFilename = nil
-            entry.latitude = backupEntry.latitude
-            entry.longitude = backupEntry.longitude
-            entry.timezone = backupEntry.timezone ?? entry.timezone
-            entry.countryCode = backupEntry.countryCode
-            entry.countryName = backupEntry.countryName
-            entry.city = backupEntry.city
-            entry.caption = backupEntry.caption
-
-            if let filename = backupEntry.imageFilename,
-               let imageData = contents.imageFiles[filename] {
-                entry.imageData = imageData
-                entry.thumbnailData = try? thumbnailData(from: imageData)
-            } else if let legacyImageData = backupEntry.legacyImageData {
-                entry.imageData = legacyImageData
-                entry.thumbnailData = backupEntry.legacyThumbnailData ?? (try? thumbnailData(from: legacyImageData))
-            }
-
-            invalidateCaches(for: entry)
+            try modelContext.save()
+        } catch {
+            throw error
         }
 
-        try modelContext.save()
+        for filename in replacedOriginalFilenames {
+            try? originalFileStore.remove(filename: filename)
+        }
     }
 
     func backfillMetadata(for entries: [PhotoEntry], in modelContext: ModelContext) {
@@ -311,7 +423,7 @@ struct PhotoStore {
         var migratedAnyEntries = false
         var allLegacyFilesWereMigrated = true
 
-        for entry in entries where entry.imageData == nil {
+        for entry in entries where entry.imageData == nil && entry.localOriginalFilename == nil {
             guard let filename = entry.imageFilename else { continue }
             let fileURL = legacyFileURL(filename: filename)
             guard fileManager.fileExists(atPath: fileURL.path) else {
@@ -321,9 +433,14 @@ struct PhotoStore {
 
             do {
                 let data = try Data(contentsOf: fileURL)
-                entry.imageData = data
+                let storedOriginal = try originalFileStore.write(data, ownerID: entry.id)
+                entry.imageData = nil
                 entry.thumbnailData = try thumbnailData(from: data)
                 entry.captureDate = entry.captureDate ?? captureDate(from: data) ?? entry.day
+                entry.localOriginalFilename = storedOriginal.filename
+                entry.originalByteCount = storedOriginal.byteCount
+                entry.originalContentHash = storedOriginal.contentHash
+                entry.originalSyncState = .localOnly
 
                 if let coordinate = locationCoordinate(from: data) {
                     entry.latitude = coordinate.latitude
@@ -346,7 +463,11 @@ struct PhotoStore {
         }
 
         if migratedAnyEntries {
-            try? modelContext.save()
+            do {
+                try modelContext.save()
+            } catch {
+                allLegacyFilesWereMigrated = false
+            }
         }
 
         if migratedAnyEntries && allLegacyFilesWereMigrated {
@@ -381,7 +502,7 @@ struct PhotoStore {
     }
 
     private func cacheKey(for entry: PhotoEntry, suffix: String) -> NSString {
-        "\(entry.day.timeIntervalSinceReferenceDate)-\(suffix)" as NSString
+        "\(entry.id)-\(entry.localOriginalFilename ?? "legacy")-\(suffix)" as NSString
     }
 
     private func invalidateCaches(for entry: PhotoEntry) {
@@ -396,6 +517,17 @@ struct PhotoStore {
     private func removeLegacyPhotosDirectoryIfPossible() {
         guard fileManager.fileExists(atPath: legacyPhotosDirectoryURL.path) else { return }
         try? fileManager.removeItem(at: legacyPhotosDirectoryURL)
+    }
+
+    private func trackReplacement(
+        oldFilename: String?,
+        newFilename: String,
+        replaced: inout [String]
+    ) {
+        guard oldFilename != newFilename else { return }
+        if let oldFilename {
+            replaced.append(oldFilename)
+        }
     }
 
     private func thumbnailData(from data: Data) throws -> Data {
@@ -499,6 +631,74 @@ struct PhotoStore {
 
         return reference.caseInsensitiveCompare(negativeReference) == .orderedSame ? -abs(value) : abs(value)
     }
+}
+
+struct StoredOriginalPhoto {
+    let filename: String
+    let byteCount: Int64
+    let contentHash: String
+}
+
+struct OriginalPhotoFileStore {
+    private let fileManager: FileManager
+    let directoryURL: URL
+
+    init(directoryURL: URL? = nil, fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+        self.directoryURL = directoryURL ?? fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0]
+        .appendingPathComponent("Daymark", isDirectory: true)
+        .appendingPathComponent("Originals", isDirectory: true)
+    }
+
+    func write(_ data: Data, ownerID: String) throws -> StoredOriginalPhoto {
+        try fileManager.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true,
+            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
+        )
+
+        let contentHash = Self.hash(data)
+        let ownerHash = Self.hash(Data(ownerID.utf8))
+        let filename = "\(ownerHash.prefix(16))-\(contentHash).image"
+        let fileURL = try url(for: filename)
+        try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+
+        return StoredOriginalPhoto(
+            filename: filename,
+            byteCount: Int64(data.count),
+            contentHash: contentHash
+        )
+    }
+
+    func read(filename: String) throws -> Data {
+        try Data(contentsOf: url(for: filename), options: [.mappedIfSafe])
+    }
+
+    func remove(filename: String?) throws {
+        guard let filename else { return }
+        let fileURL = try url(for: filename)
+        guard fileManager.fileExists(atPath: fileURL.path) else { return }
+        try fileManager.removeItem(at: fileURL)
+    }
+
+    private func url(for filename: String) throws -> URL {
+        guard filename == URL(fileURLWithPath: filename).lastPathComponent,
+              filename.hasSuffix(".image") else {
+            throw OriginalPhotoFileStoreError.invalidFilename
+        }
+        return directoryURL.appendingPathComponent(filename, isDirectory: false)
+    }
+
+    private static func hash(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+enum OriginalPhotoFileStoreError: Error {
+    case invalidFilename
 }
 
 struct PhotoLocationOverride {
