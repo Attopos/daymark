@@ -172,8 +172,8 @@ final class daymarkTests: XCTestCase {
         XCTAssertEqual(fixture.entry.originalSyncState, .synced)
         XCTAssertNil(fixture.entry.lastSyncErrorMessage)
         XCTAssertEqual(remoteStore.uploadRequests.count, 1)
-        XCTAssertEqual(remoteStore.uploadRequests.first?.entryID, fixture.entry.id)
-        XCTAssertEqual(remoteStore.uploadRequests.first?.data, fixture.data)
+        XCTAssertEqual(remoteStore.uploadRequests.first?.request.entryID, fixture.entry.id)
+        XCTAssertEqual(remoteStore.uploadRequests.first?.request.data, fixture.data)
     }
 
     func testOriginalSyncCoordinatorRecordsUploadFailure() async throws {
@@ -291,7 +291,97 @@ final class daymarkTests: XCTestCase {
             fixture.entry.lastSyncErrorMessage,
             "This device and iCloud contain different original photos."
         )
+        XCTAssertEqual(fixture.entry.originalConflictRemoteHash, String(repeating: "f", count: 64))
+        XCTAssertEqual(fixture.entry.originalConflictRemoteByteCount, 500)
+        XCTAssertNotNil(fixture.entry.originalConflictDetectedAt)
         XCTAssertTrue(remoteStore.uploadRequests.isEmpty)
+    }
+
+    func testConflictResolverKeepsLocalAndOverwritesRemote() async throws {
+        let fixture = try makeOriginalSyncFixture()
+        fixture.entry.originalSyncState = .conflict
+        fixture.entry.recordOriginalConflict(
+            remote: RemoteOriginalPhoto(
+                entryID: fixture.entry.id,
+                contentHash: String(repeating: "f", count: 64),
+                byteCount: 500,
+                modifiedAt: .now
+            )
+        )
+        let remoteStore = RecordingOriginalRemoteStore()
+
+        try await OriginalPhotoConflictResolver(
+            remoteStore: remoteStore,
+            photoStore: fixture.store
+        ).keepLocal(fixture.entry, in: fixture.context)
+
+        XCTAssertEqual(fixture.entry.originalSyncState, .synced)
+        XCTAssertEqual(fixture.entry.originalConflictResolution, .keptLocal)
+        XCTAssertNil(fixture.entry.originalConflictRemoteHash)
+        XCTAssertNil(fixture.entry.lastSyncErrorMessage)
+        XCTAssertEqual(remoteStore.uploadRequests.count, 1)
+        XCTAssertEqual(remoteStore.uploadRequests.first?.overwrite, true)
+        XCTAssertEqual(remoteStore.uploadRequests.first?.request.data, fixture.data)
+    }
+
+    func testConflictResolverUsesVerifiedICloudOriginal() async throws {
+        let fixture = try makeOriginalSyncFixture()
+        let cloudData = Data("icloud-wins".utf8)
+        let cloudHash = SHA256.hash(data: cloudData)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        fixture.entry.originalSyncState = .conflict
+        fixture.entry.recordOriginalConflict(
+            remote: RemoteOriginalPhoto(
+                entryID: fixture.entry.id,
+                contentHash: cloudHash,
+                byteCount: Int64(cloudData.count),
+                modifiedAt: .now
+            )
+        )
+        let remoteStore = RecordingOriginalRemoteStore(
+            downloads: [fixture.entry.id: cloudData]
+        )
+
+        try await OriginalPhotoConflictResolver(
+            remoteStore: remoteStore,
+            photoStore: fixture.store
+        ).useICloud(fixture.entry, in: fixture.context)
+
+        XCTAssertEqual(fixture.entry.originalSyncState, .synced)
+        XCTAssertEqual(fixture.entry.originalConflictResolution, .usedICloud)
+        XCTAssertNil(fixture.entry.originalConflictRemoteHash)
+        XCTAssertEqual(fixture.store.originalData(for: fixture.entry), cloudData)
+        XCTAssertEqual(fixture.entry.originalContentHash, cloudHash)
+    }
+
+    func testConflictResolverRejectsUnverifiedICloudOriginal() async throws {
+        let fixture = try makeOriginalSyncFixture()
+        fixture.entry.originalSyncState = .conflict
+        fixture.entry.recordOriginalConflict(
+            remote: RemoteOriginalPhoto(
+                entryID: fixture.entry.id,
+                contentHash: String(repeating: "a", count: 64),
+                byteCount: 20,
+                modifiedAt: .now
+            )
+        )
+        let remoteStore = RecordingOriginalRemoteStore(
+            downloads: [fixture.entry.id: Data("tampered".utf8)]
+        )
+
+        do {
+            try await OriginalPhotoConflictResolver(
+                remoteStore: remoteStore,
+                photoStore: fixture.store
+            ).useICloud(fixture.entry, in: fixture.context)
+            XCTFail("Expected checksum verification to fail")
+        } catch let error as OriginalPhotoSyncError {
+            XCTAssertEqual(error, .downloadHashMismatch)
+        }
+
+        XCTAssertEqual(fixture.entry.originalSyncState, .conflict)
+        XCTAssertEqual(fixture.store.originalData(for: fixture.entry), fixture.data)
     }
 
     func testOriginalSyncCoordinatorDefersTransfersBeyondBatchLimit() async throws {
@@ -413,7 +503,12 @@ final class daymarkTests: XCTestCase {
 
 @MainActor
 private final class RecordingOriginalRemoteStore: OriginalPhotoRemoteStore {
-    private(set) var uploadRequests: [OriginalPhotoUploadRequest] = []
+    struct RecordedUpload {
+        let request: OriginalPhotoUploadRequest
+        let overwrite: Bool
+    }
+
+    private(set) var uploadRequests: [RecordedUpload] = []
     private let remoteInventory: [String: RemoteOriginalPhoto]
     private let downloads: [String: Data]
     private let uploadError: Error?
@@ -432,8 +527,8 @@ private final class RecordingOriginalRemoteStore: OriginalPhotoRemoteStore {
         remoteInventory
     }
 
-    func upload(_ request: OriginalPhotoUploadRequest) async throws {
-        uploadRequests.append(request)
+    func upload(_ request: OriginalPhotoUploadRequest, overwrite: Bool) async throws {
+        uploadRequests.append(RecordedUpload(request: request, overwrite: overwrite))
         if let uploadError {
             throw uploadError
         }

@@ -25,6 +25,11 @@ final class PhotoEntry {
     var syncStateUpdatedAt: Date?
     var lastSyncErrorComponentRaw: String?
     var lastSyncErrorMessage: String?
+    var originalConflictRemoteHash: String?
+    var originalConflictRemoteByteCount: Int64?
+    var originalConflictRemoteModifiedAt: Date?
+    var originalConflictDetectedAt: Date?
+    var originalConflictResolutionRaw: String?
 
     init(
         id: String = UUID().uuidString,
@@ -102,6 +107,30 @@ extension PhotoEntry {
         )
     }
 
+    var originalConflictResolution: OriginalConflictResolution? {
+        get {
+            guard let originalConflictResolutionRaw else { return nil }
+            return OriginalConflictResolution(rawValue: originalConflictResolutionRaw)
+        }
+        set { originalConflictResolutionRaw = newValue?.rawValue }
+    }
+
+    func recordOriginalConflict(remote: RemoteOriginalPhoto, at date: Date = .now) {
+        originalConflictRemoteHash = remote.contentHash
+        originalConflictRemoteByteCount = remote.byteCount
+        originalConflictRemoteModifiedAt = remote.modifiedAt
+        originalConflictDetectedAt = date
+        originalConflictResolution = nil
+    }
+
+    func clearOriginalConflict(resolution: OriginalConflictResolution) {
+        originalConflictRemoteHash = nil
+        originalConflictRemoteByteCount = nil
+        originalConflictRemoteModifiedAt = nil
+        originalConflictDetectedAt = nil
+        originalConflictResolution = resolution
+    }
+
     @discardableResult
     func transitionSyncState(
         for component: SyncComponent,
@@ -161,6 +190,11 @@ enum SyncState: String, CaseIterable, Codable {
     case synced
     case failed
     case conflict
+}
+
+enum OriginalConflictResolution: String, Codable {
+    case keptLocal
+    case usedICloud
 }
 
 enum SyncStateMachine {

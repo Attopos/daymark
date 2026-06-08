@@ -34,6 +34,9 @@ struct ContentView: View {
                 if ProcessInfo.processInfo.arguments.contains("-runOriginalSyncExperiment") {
                     await runOriginalSyncExperiment(entries: entries)
                 }
+                if ProcessInfo.processInfo.arguments.contains("-runOriginalInventoryExperiment") {
+                    await runOriginalInventoryExperiment()
+                }
 #endif
             }
         }
@@ -61,6 +64,15 @@ struct ContentView: View {
             )
         } catch {
             print("DAYMARK_SYNC_EXPERIMENT_ERROR \(error.localizedDescription)")
+        }
+    }
+
+    private func runOriginalInventoryExperiment() async {
+        do {
+            let inventory = try await CloudKitOriginalPhotoStore().inventory()
+            print("DAYMARK_INVENTORY_EXPERIMENT_RESULT records=\(inventory.count)")
+        } catch {
+            print("DAYMARK_INVENTORY_EXPERIMENT_ERROR \(error.localizedDescription)")
         }
     }
 #endif

@@ -20,8 +20,14 @@ struct OriginalPhotoUploadRequest {
 
 protocol OriginalPhotoRemoteStore {
     func inventory() async throws -> [String: RemoteOriginalPhoto]
-    func upload(_ request: OriginalPhotoUploadRequest) async throws
+    func upload(_ request: OriginalPhotoUploadRequest, overwrite: Bool) async throws
     func download(entryID: String) async throws -> Data
+}
+
+extension OriginalPhotoRemoteStore {
+    func upload(_ request: OriginalPhotoUploadRequest) async throws {
+        try await upload(request, overwrite: false)
+    }
 }
 
 struct OriginalPhotoSyncLimits {
@@ -94,7 +100,7 @@ struct OriginalPhotoSyncCoordinator {
                     markSynced(entry)
                     summary.skippedCount += 1
                 } else {
-                    markConflict(entry)
+                    markConflict(entry, remote: remote)
                     summary.conflictCount += 1
                 }
                 try? modelContext.save()
@@ -201,13 +207,14 @@ struct OriginalPhotoSyncCoordinator {
         }
     }
 
-    private func markConflict(_ entry: PhotoEntry) {
+    private func markConflict(_ entry: PhotoEntry, remote: RemoteOriginalPhoto) {
         if !entry.transitionSyncState(for: .original, to: .conflict) {
             entry.originalSyncState = .conflict
             entry.syncStateUpdatedAt = .now
         }
         entry.lastSyncErrorComponentRaw = SyncComponent.original.rawValue
         entry.lastSyncErrorMessage = OriginalPhotoSyncError.contentConflict.localizedDescription
+        entry.recordOriginalConflict(remote: remote)
     }
 
     private func markFailed(_ entry: PhotoEntry, message: String) {
@@ -274,7 +281,7 @@ struct CloudKitOriginalPhotoStore: OriginalPhotoRemoteStore {
         return inventory
     }
 
-    func upload(_ request: OriginalPhotoUploadRequest) async throws {
+    func upload(_ request: OriginalPhotoUploadRequest, overwrite: Bool) async throws {
         try await ensureZoneExists()
 
         let temporaryURL = FileManager.default.temporaryDirectory
@@ -292,7 +299,7 @@ struct CloudKitOriginalPhotoStore: OriginalPhotoRemoteStore {
 
         try await withCheckedThrowingContinuation { continuation in
             let operation = CKModifyRecordsOperation(recordsToSave: [record])
-            operation.savePolicy = .changedKeys
+            operation.savePolicy = overwrite ? .allKeys : .changedKeys
             operation.isAtomic = true
             operation.modifyRecordsResultBlock = { result in
                 continuation.resume(with: result.map { _ in () })
@@ -320,11 +327,85 @@ struct CloudKitOriginalPhotoStore: OriginalPhotoRemoteStore {
     }
 }
 
-enum OriginalPhotoSyncError: LocalizedError {
+@MainActor
+struct OriginalPhotoConflictResolver {
+    private let remoteStore: any OriginalPhotoRemoteStore
+    private let photoStore: PhotoStore
+
+    init() {
+        remoteStore = CloudKitOriginalPhotoStore()
+        photoStore = PhotoStore()
+    }
+
+    init(
+        remoteStore: any OriginalPhotoRemoteStore,
+        photoStore: PhotoStore
+    ) {
+        self.remoteStore = remoteStore
+        self.photoStore = photoStore
+    }
+
+    func keepLocal(_ entry: PhotoEntry, in modelContext: ModelContext) async throws {
+        guard entry.originalSyncState == .conflict,
+              let data = photoStore.originalData(for: entry) else {
+            throw OriginalPhotoSyncError.missingLocalOriginal
+        }
+
+        let contentHash = Self.hash(data)
+        let byteCount = Int64(data.count)
+        try await remoteStore.upload(
+            OriginalPhotoUploadRequest(
+                entryID: entry.id,
+                data: data,
+                contentHash: contentHash,
+                byteCount: byteCount,
+                modifiedAt: .now
+            ),
+            overwrite: true
+        )
+
+        entry.originalContentHash = contentHash
+        entry.originalByteCount = byteCount
+        entry.clearOriginalConflict(resolution: .keptLocal)
+        markResolved(entry)
+        try modelContext.save()
+    }
+
+    func useICloud(_ entry: PhotoEntry, in modelContext: ModelContext) async throws {
+        guard entry.originalSyncState == .conflict,
+              let remoteHash = entry.originalConflictRemoteHash else {
+            throw OriginalPhotoSyncError.missingConflictSnapshot
+        }
+
+        let data = try await remoteStore.download(entryID: entry.id)
+        guard Self.hash(data) == remoteHash else {
+            throw OriginalPhotoSyncError.downloadHashMismatch
+        }
+
+        try photoStore.storeDownloadedOriginal(data, for: entry)
+        entry.clearOriginalConflict(resolution: .usedICloud)
+        markResolved(entry)
+        try modelContext.save()
+    }
+
+    private func markResolved(_ entry: PhotoEntry) {
+        entry.originalSyncState = .synced
+        entry.syncStateUpdatedAt = .now
+        entry.lastSyncErrorComponentRaw = nil
+        entry.lastSyncErrorMessage = nil
+    }
+
+    private static func hash(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+enum OriginalPhotoSyncError: LocalizedError, Equatable {
     case missingLocalOriginal
     case missingRemoteAsset
     case downloadHashMismatch
     case contentConflict
+    case missingConflictSnapshot
 
     var errorDescription: String? {
         switch self {
@@ -336,6 +417,8 @@ enum OriginalPhotoSyncError: LocalizedError {
             "The downloaded original did not match its iCloud checksum."
         case .contentConflict:
             "This device and iCloud contain different original photos."
+        case .missingConflictSnapshot:
+            "The conflict details are missing. Sync again before resolving it."
         }
     }
 }

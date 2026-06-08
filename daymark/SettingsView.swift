@@ -250,6 +250,7 @@ struct ICloudSyncDetailView: View {
     @State private var cachedChangeToken: CKServerChangeToken?
     @State private var cachedCloudIDs: Set<CKRecord.ID> = []
     @State private var hasFullCloudSnapshot = false
+    @State private var pendingConflictAction: PendingConflictAction?
 
     private let ckContainer = CKContainer(identifier: "iCloud.com.shizhengcao.Daymark")
     private let syncZoneID = CKRecordZone.ID(
@@ -282,6 +283,10 @@ struct ICloudSyncDetailView: View {
 
     private var failedOriginalCount: Int {
         entries.count { $0.originalSyncState == .failed }
+    }
+
+    private var conflictedEntries: [PhotoEntry] {
+        entries.filter { $0.originalSyncState == .conflict }
     }
 
     private var overallStatus: String {
@@ -352,7 +357,61 @@ struct ICloudSyncDetailView: View {
                             .foregroundStyle(.red)
                     }
                 }
+                if !conflictedEntries.isEmpty {
+                    LabeledContent("Originals Conflicted") {
+                        Text("\(conflictedEntries.count)")
+                            .foregroundStyle(.red)
+                    }
+                }
             }
+
+                if !conflictedEntries.isEmpty {
+                    Section {
+                        ForEach(conflictedEntries) { entry in
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(entry.day.formatted(.dateTime.year().month().day()))
+                                    .font(.headline)
+
+                                HStack {
+                                    Label(
+                                        formattedByteCount(entry.originalByteCount),
+                                        systemImage: "iphone"
+                                    )
+                                    Spacer()
+                                    Label(
+                                        formattedByteCount(entry.originalConflictRemoteByteCount),
+                                        systemImage: "icloud"
+                                    )
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                                HStack {
+                                    Button("Keep This Device") {
+                                        pendingConflictAction = PendingConflictAction(
+                                            entry: entry,
+                                            resolution: .keptLocal
+                                        )
+                                    }
+                                    .buttonStyle(.bordered)
+
+                                    Button("Use iCloud") {
+                                        pendingConflictAction = PendingConflictAction(
+                                            entry: entry,
+                                            resolution: .usedICloud
+                                        )
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    } header: {
+                        Text("Conflicts")
+                    } footer: {
+                        Text("Choosing a version replaces the other original photo. This action does not change the date, caption, or location.")
+                    }
+                }
 
                 if localPhotoCount > 0 || cloudPhotoCount != nil {
                     Section("Sync Progress") {
@@ -444,6 +503,21 @@ struct ICloudSyncDetailView: View {
         .task { await observeSyncEvents() }
         .task { await refreshCounts() }
         .onDisappear { stopProgressPolling() }
+        .confirmationDialog(
+            conflictDialogTitle,
+            isPresented: conflictDialogBinding,
+            titleVisibility: .visible
+        ) {
+            Button(conflictConfirmationLabel, role: .destructive) {
+                guard let action = pendingConflictAction else { return }
+                Task { await resolveConflict(action) }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingConflictAction = nil
+            }
+        } message: {
+            Text(conflictDialogMessage)
+        }
     }
 
     private func manualSync() async {
@@ -484,6 +558,66 @@ struct ICloudSyncDetailView: View {
             syncMessage = describeCloudKitError(error)
         }
         isSyncing = false
+    }
+
+    private func resolveConflict(_ action: PendingConflictAction) async {
+        isSyncing = true
+        syncMessage = nil
+        pendingConflictAction = nil
+
+        do {
+            let resolver = OriginalPhotoConflictResolver()
+            switch action.resolution {
+            case .keptLocal:
+                try await resolver.keepLocal(action.entry, in: modelContext)
+                syncMessage = "Kept this device's original and updated iCloud."
+            case .usedICloud:
+                try await resolver.useICloud(action.entry, in: modelContext)
+                syncMessage = "Downloaded and used the iCloud original."
+            }
+        } catch {
+            syncMessage = describeCloudKitError(error)
+        }
+        isSyncing = false
+    }
+
+    private func formattedByteCount(_ byteCount: Int64?) -> String {
+        guard let byteCount else { return "Unknown" }
+        return ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
+    }
+
+    private var conflictDialogBinding: Binding<Bool> {
+        Binding(
+            get: { pendingConflictAction != nil },
+            set: { if !$0 { pendingConflictAction = nil } }
+        )
+    }
+
+    private var conflictDialogTitle: String {
+        switch pendingConflictAction?.resolution {
+        case .keptLocal: "Keep This Device's Original?"
+        case .usedICloud: "Use the iCloud Original?"
+        case nil: "Resolve Conflict"
+        }
+    }
+
+    private var conflictConfirmationLabel: String {
+        switch pendingConflictAction?.resolution {
+        case .keptLocal: "Replace iCloud Original"
+        case .usedICloud: "Replace This Device's Original"
+        case nil: "Resolve"
+        }
+    }
+
+    private var conflictDialogMessage: String {
+        switch pendingConflictAction?.resolution {
+        case .keptLocal:
+            "The original stored in iCloud will be replaced by the version on this device."
+        case .usedICloud:
+            "The original on this device will be replaced after the iCloud download passes checksum verification."
+        case nil:
+            ""
+        }
     }
 
     private func verifyCloudKitWriteAccess() async throws {
@@ -692,6 +826,11 @@ struct ICloudSyncDetailView: View {
             }
         }
     }
+}
+
+private struct PendingConflictAction {
+    let entry: PhotoEntry
+    let resolution: OriginalConflictResolution
 }
 
 private struct SyncActivity: Identifiable {
