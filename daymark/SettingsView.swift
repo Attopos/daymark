@@ -235,6 +235,7 @@ struct SettingsView: View {
 
 struct ICloudSyncDetailView: View {
     @Environment(\.modelContext) private var modelContext
+    @Query(sort: \PhotoEntry.day, order: .reverse) private var entries: [PhotoEntry]
     @AppStorage("lastSuccessfulSyncTimestamp") private var lastSuccessfulSyncTimestamp: Double = 0
     @AppStorage("cloudKitFallbackToLocal") private var fellBackToLocal = false
 
@@ -271,6 +272,16 @@ struct ICloudSyncDetailView: View {
                 .sorted { ($0.endDate ?? .distantPast) > ($1.endDate ?? .distantPast) }
                 .prefix(6)
         )
+    }
+
+    private var pendingOriginalCount: Int {
+        entries.count {
+            [.localOnly, .pendingUpload, .uploading].contains($0.originalSyncState)
+        }
+    }
+
+    private var failedOriginalCount: Int {
+        entries.count { $0.originalSyncState == .failed }
     }
 
     private var overallStatus: String {
@@ -329,6 +340,16 @@ struct ICloudSyncDetailView: View {
                         Text(lastSyncDate.formatted(.dateTime.month().day().hour().minute().second()))
                     } else {
                         Text("—")
+                    }
+                }
+                LabeledContent("Originals Pending") {
+                    Text("\(pendingOriginalCount)")
+                        .foregroundStyle(pendingOriginalCount == 0 ? Color.primary : Color.orange)
+                }
+                if failedOriginalCount > 0 {
+                    LabeledContent("Originals Failed") {
+                        Text("\(failedOriginalCount)")
+                            .foregroundStyle(.red)
                     }
                 }
             }
@@ -438,19 +459,31 @@ struct ICloudSyncDetailView: View {
         }
 
         refreshLocalCount()
-        try? modelContext.save()
-        syncMessage = "Syncing \(localPhotoCount) photos..."
+        syncMessage = pendingOriginalCount + failedOriginalCount > 0
+            ? "Uploading original photos..."
+            : "Checking for pending changes..."
         startProgressPolling()
 
-        Task {
-            try? await Task.sleep(for: .seconds(30))
-            if isSyncing {
-                isSyncing = false
-                if syncMessage?.starts(with: "Syncing") == true {
-                    syncMessage = "Sync triggered. Photos will continue syncing in the background."
-                }
+        do {
+            let summary = try await OriginalPhotoSyncCoordinator().syncOriginals(
+                entries: entries,
+                in: modelContext
+            )
+            let transferred = summary.uploadedCount + summary.downloadedCount
+
+            if summary.conflictCount > 0 || summary.failedCount > 0 {
+                syncMessage = "\(transferred) transferred, \(summary.conflictCount) conflicts, \(summary.failedCount) failed."
+            } else if summary.deferredCount > 0 {
+                syncMessage = "\(transferred) transferred. \(summary.deferredCount) originals remain for the next batch."
+            } else if transferred > 0 {
+                syncMessage = "Uploaded \(summary.uploadedCount), downloaded \(summary.downloadedCount) originals."
+            } else {
+                syncMessage = "Original photos are up to date. Metadata sync continues automatically."
             }
+        } catch {
+            syncMessage = describeCloudKitError(error)
         }
+        isSyncing = false
     }
 
     private func verifyCloudKitWriteAccess() async throws {

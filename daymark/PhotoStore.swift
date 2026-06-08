@@ -86,6 +86,15 @@ struct PhotoStore {
         return entry.imageData
     }
 
+    func storeDownloadedOriginal(_ data: Data, for entry: PhotoEntry) throws {
+        let storedOriginal = try originalFileStore.write(data, ownerID: entry.id)
+        entry.imageData = nil
+        entry.localOriginalFilename = storedOriginal.filename
+        entry.originalByteCount = storedOriginal.byteCount
+        entry.originalContentHash = storedOriginal.contentHash
+        invalidateCaches(for: entry)
+    }
+
     func makeBackupExportItem(from entries: [PhotoEntry]) throws -> DaymarkBackupExportItem {
         let backupEntries = entries.map { entry in
             DaymarkBackupEntry(
