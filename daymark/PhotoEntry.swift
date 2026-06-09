@@ -10,8 +10,12 @@ final class PhotoEntry {
     var captureDate: Date?
     var imageFilename: String?
     var localOriginalFilename: String?
+    var localThumbnailFilename: String?
     var originalByteCount: Int64?
     var originalContentHash: String?
+    var thumbnailByteCount: Int64?
+    var thumbnailContentHash: String?
+    var thumbnailModifiedAt: Date?
     var latitude: Double?
     var longitude: Double?
     var timezone: String?
@@ -39,8 +43,12 @@ final class PhotoEntry {
         captureDate: Date? = nil,
         imageFilename: String? = nil,
         localOriginalFilename: String? = nil,
+        localThumbnailFilename: String? = nil,
         originalByteCount: Int64? = nil,
         originalContentHash: String? = nil,
+        thumbnailByteCount: Int64? = nil,
+        thumbnailContentHash: String? = nil,
+        thumbnailModifiedAt: Date? = nil,
         latitude: Double? = nil,
         longitude: Double? = nil,
         timezone: String? = nil,
@@ -59,8 +67,12 @@ final class PhotoEntry {
         self.captureDate = captureDate
         self.imageFilename = imageFilename
         self.localOriginalFilename = localOriginalFilename
+        self.localThumbnailFilename = localThumbnailFilename
         self.originalByteCount = originalByteCount
         self.originalContentHash = originalContentHash
+        self.thumbnailByteCount = thumbnailByteCount
+        self.thumbnailContentHash = thumbnailContentHash
+        self.thumbnailModifiedAt = thumbnailModifiedAt
         self.latitude = latitude
         self.longitude = longitude
         self.timezone = timezone

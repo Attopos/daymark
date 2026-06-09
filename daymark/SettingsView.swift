@@ -539,20 +539,25 @@ struct ICloudSyncDetailView: View {
         startProgressPolling()
 
         do {
+            let thumbnailSummary = try await ThumbnailPhotoSyncCoordinator().syncThumbnails(
+                entries: entries,
+                in: modelContext
+            )
             let summary = try await OriginalPhotoSyncCoordinator().syncOriginals(
                 entries: entries,
                 in: modelContext
             )
             let transferred = summary.uploadedCount + summary.downloadedCount
+            let thumbnailTransferred = thumbnailSummary.uploadedCount + thumbnailSummary.downloadedCount
 
-            if summary.conflictCount > 0 || summary.failedCount > 0 {
-                syncMessage = "\(transferred) transferred, \(summary.conflictCount) conflicts, \(summary.failedCount) failed."
+            if summary.conflictCount > 0 || summary.failedCount > 0 || thumbnailSummary.failedCount > 0 {
+                syncMessage = "\(thumbnailTransferred) thumbnails and \(transferred) originals transferred. \(summary.conflictCount) conflicts, \(summary.failedCount + thumbnailSummary.failedCount) failed."
             } else if summary.deferredCount > 0 {
-                syncMessage = "\(transferred) transferred. \(summary.deferredCount) originals remain for the next batch."
-            } else if transferred > 0 {
-                syncMessage = "Uploaded \(summary.uploadedCount), downloaded \(summary.downloadedCount) originals."
+                syncMessage = "\(thumbnailTransferred) thumbnails and \(transferred) originals transferred. \(summary.deferredCount) originals remain for the next batch."
+            } else if transferred > 0 || thumbnailTransferred > 0 {
+                syncMessage = "Transferred \(thumbnailTransferred) thumbnails and \(transferred) originals."
             } else {
-                syncMessage = "Original photos are up to date. Metadata sync continues automatically."
+                syncMessage = "Photos and thumbnails are up to date. Metadata sync continues automatically."
             }
         } catch {
             syncMessage = describeCloudKitError(error)

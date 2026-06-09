@@ -118,11 +118,19 @@ final class daymarkTests: XCTestCase {
     func testPhotoStoreKeepsOriginalOutsideSwiftDataAndRemovesItOnDelete() async throws {
         let directoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        let thumbnailDirectoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: directoryURL)
+            try? FileManager.default.removeItem(at: thumbnailDirectoryURL)
+        }
 
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
-        let store = PhotoStore(originalsDirectoryURL: directoryURL)
+        let store = PhotoStore(
+            originalsDirectoryURL: directoryURL,
+            thumbnailsDirectoryURL: thumbnailDirectoryURL
+        )
         let imageData = try makeJPEGData()
 
         try await store.savePhotoData(
@@ -134,15 +142,22 @@ final class daymarkTests: XCTestCase {
         let entries = try context.fetch(FetchDescriptor<PhotoEntry>())
         let entry = try XCTUnwrap(entries.first)
         let filename = try XCTUnwrap(entry.localOriginalFilename)
+        let thumbnailFilename = try XCTUnwrap(entry.localThumbnailFilename)
 
         XCTAssertNil(entry.imageData)
-        XCTAssertNotNil(entry.thumbnailData)
+        XCTAssertNil(entry.thumbnailData)
+        XCTAssertNotNil(store.thumbnailData(for: entry))
+        XCTAssertEqual(entry.thumbnailSyncState, .localOnly)
+        XCTAssertEqual(entry.thumbnailContentHash?.count, 64)
         XCTAssertEqual(entry.originalByteCount, Int64(imageData.count))
         XCTAssertEqual(entry.originalContentHash?.count, 64)
         XCTAssertEqual(entry.originalSyncState, .localOnly)
         XCTAssertEqual(store.originalData(for: entry), imageData)
         XCTAssertTrue(FileManager.default.fileExists(
             atPath: directoryURL.appendingPathComponent(filename).path
+        ))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: thumbnailDirectoryURL.appendingPathComponent(thumbnailFilename).path
         ))
 
         try store.deleteEntry(entry, in: context)
@@ -151,6 +166,109 @@ final class daymarkTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(
             atPath: directoryURL.appendingPathComponent(filename).path
         ))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: thumbnailDirectoryURL.appendingPathComponent(thumbnailFilename).path
+        ))
+    }
+
+    func testEmbeddedThumbnailMigrationMovesDataOutsideSwiftData() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let thumbnailDirectoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: thumbnailDirectoryURL) }
+        let embeddedData = Data("legacy-thumbnail".utf8)
+        let entry = PhotoEntry(day: .now, thumbnailData: embeddedData)
+        context.insert(entry)
+        try context.save()
+        let store = PhotoStore(thumbnailsDirectoryURL: thumbnailDirectoryURL)
+
+        store.migrateEmbeddedThumbnails(for: [entry], in: context)
+
+        XCTAssertNil(entry.thumbnailData)
+        XCTAssertNotNil(entry.localThumbnailFilename)
+        XCTAssertEqual(entry.thumbnailByteCount, Int64(embeddedData.count))
+        XCTAssertEqual(entry.thumbnailContentHash?.count, 64)
+        XCTAssertEqual(entry.thumbnailSyncState, .localOnly)
+        XCTAssertEqual(store.thumbnailData(for: entry), embeddedData)
+    }
+
+    func testThumbnailSyncCoordinatorUploadsLocalThumbnail() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let thumbnailDirectoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: thumbnailDirectoryURL) }
+        let fileStore = ThumbnailPhotoFileStore(directoryURL: thumbnailDirectoryURL)
+        let data = Data("thumbnail-upload".utf8)
+        let stored = try fileStore.write(data, ownerID: "thumbnail-entry")
+        let entry = PhotoEntry(
+            id: "thumbnail-entry",
+            day: .now,
+            localThumbnailFilename: stored.filename,
+            thumbnailByteCount: stored.byteCount,
+            thumbnailContentHash: stored.contentHash,
+            thumbnailModifiedAt: Date(timeIntervalSince1970: 100),
+            thumbnailSyncState: .localOnly
+        )
+        context.insert(entry)
+        try context.save()
+        let remoteStore = RecordingThumbnailRemoteStore()
+
+        let summary = try await ThumbnailPhotoSyncCoordinator(
+            remoteStore: remoteStore,
+            photoStore: PhotoStore(thumbnailsDirectoryURL: thumbnailDirectoryURL)
+        ).syncThumbnails(entries: [entry], in: context)
+
+        XCTAssertEqual(summary.uploadedCount, 1)
+        XCTAssertEqual(summary.failedCount, 0)
+        XCTAssertEqual(entry.thumbnailSyncState, .synced)
+        XCTAssertEqual(remoteStore.uploadRequests.first?.request.data, data)
+        XCTAssertEqual(remoteStore.uploadRequests.first?.overwrite, false)
+        XCTAssertEqual(remoteStore.batchUploadSizes, [1])
+    }
+
+    func testThumbnailSyncCoordinatorDownloadsWhenSyncedFilenameIsNotLocal() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let thumbnailDirectoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: thumbnailDirectoryURL) }
+        let data = Data("thumbnail-download".utf8)
+        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let remote = RemoteThumbnailPhoto(
+            entryID: "remote-thumbnail-entry",
+            contentHash: hash,
+            byteCount: Int64(data.count),
+            modifiedAt: Date(timeIntervalSince1970: 200)
+        )
+        let entry = PhotoEntry(
+            id: remote.entryID,
+            day: .now,
+            localThumbnailFilename: "filename-from-another-device.thumb",
+            thumbnailByteCount: remote.byteCount,
+            thumbnailContentHash: remote.contentHash,
+            thumbnailModifiedAt: remote.modifiedAt,
+            thumbnailSyncState: .synced
+        )
+        context.insert(entry)
+        try context.save()
+        let remoteStore = RecordingThumbnailRemoteStore(
+            inventory: [entry.id: remote],
+            downloads: [entry.id: data]
+        )
+        let photoStore = PhotoStore(thumbnailsDirectoryURL: thumbnailDirectoryURL)
+
+        let summary = try await ThumbnailPhotoSyncCoordinator(
+            remoteStore: remoteStore,
+            photoStore: photoStore
+        ).syncThumbnails(entries: [entry], in: context)
+
+        XCTAssertEqual(summary.downloadedCount, 1)
+        XCTAssertEqual(summary.failedCount, 0)
+        XCTAssertEqual(entry.thumbnailSyncState, .synced)
+        XCTAssertNotEqual(entry.localThumbnailFilename, "filename-from-another-device.thumb")
+        XCTAssertEqual(photoStore.thumbnailData(for: entry), data)
     }
 
     func testOriginalSyncCoordinatorUploadsPendingOriginal() async throws {
@@ -539,6 +657,57 @@ private final class RecordingOriginalRemoteStore: OriginalPhotoRemoteStore {
             throw OriginalPhotoSyncError.missingRemoteAsset
         }
         return data
+    }
+}
+
+@MainActor
+private final class RecordingThumbnailRemoteStore: ThumbnailPhotoRemoteStore {
+    struct RecordedUpload {
+        let request: ThumbnailPhotoUploadRequest
+        let overwrite: Bool
+    }
+
+    private(set) var uploadRequests: [RecordedUpload] = []
+    private(set) var batchUploadSizes: [Int] = []
+    private let remoteInventory: [String: RemoteThumbnailPhoto]
+    private let downloads: [String: Data]
+
+    init(
+        inventory: [String: RemoteThumbnailPhoto] = [:],
+        downloads: [String: Data] = [:]
+    ) {
+        remoteInventory = inventory
+        self.downloads = downloads
+    }
+
+    func inventory() async throws -> [String: RemoteThumbnailPhoto] {
+        remoteInventory
+    }
+
+    func upload(_ request: ThumbnailPhotoUploadRequest, overwrite: Bool) async throws {
+        uploadRequests.append(RecordedUpload(request: request, overwrite: overwrite))
+    }
+
+    func upload(_ requests: [ThumbnailPhotoUploadRequest], overwrite: Bool) async throws {
+        batchUploadSizes.append(requests.count)
+        for request in requests {
+            uploadRequests.append(RecordedUpload(request: request, overwrite: overwrite))
+        }
+    }
+
+    func download(entryID: String) async throws -> Data {
+        guard let data = downloads[entryID] else {
+            throw ThumbnailPhotoSyncError.missingRemoteAsset
+        }
+        return data
+    }
+
+    func download(entryIDs: [String]) async throws -> [String: Data] {
+        var result: [String: Data] = [:]
+        for entryID in entryIDs {
+            result[entryID] = try await download(entryID: entryID)
+        }
+        return result
     }
 }
 

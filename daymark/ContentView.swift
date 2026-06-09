@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @AppStorage("prefersDarkMode") private var prefersDarkMode = false
+    @Query private var entries: [PhotoEntry]
     private let photoStore = PhotoStore()
 
     var body: some View {
@@ -25,21 +26,54 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(prefersDarkMode ? .dark : .light)
-        .task {
-            await photoStore.migrateLegacyLibraryIfNeeded(in: modelContext)
-            let descriptor = FetchDescriptor<PhotoEntry>()
-            if let entries = try? modelContext.fetch(descriptor) {
-                photoStore.backfillMetadata(for: entries, in: modelContext)
+        .task(id: thumbnailSyncKey) {
 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("-runOriginalSyncExperiment") {
-                    await runOriginalSyncExperiment(entries: entries)
-                }
-                if ProcessInfo.processInfo.arguments.contains("-runOriginalInventoryExperiment") {
-                    await runOriginalInventoryExperiment()
-                }
+            if ProcessInfo.processInfo.arguments.contains("-runMetadataSyncExperiment") {
+                await MetadataSyncExperiment.run(
+                    arguments: ProcessInfo.processInfo.arguments,
+                    in: modelContext
+                )
+                return
+            }
+#endif
+            await photoStore.migrateLegacyLibraryIfNeeded(in: modelContext)
+            photoStore.backfillMetadata(for: entries, in: modelContext)
+            photoStore.migrateEmbeddedThumbnails(for: entries, in: modelContext)
+            do {
+                let summary = try await ThumbnailPhotoSyncCoordinator().syncThumbnails(
+                    entries: entries,
+                    in: modelContext
+                )
+#if DEBUG
+                print(
+                    "DAYMARK_THUMBNAIL_SYNC_RESULT " +
+                    "uploaded=\(summary.uploadedCount) " +
+                    "downloaded=\(summary.downloadedCount) " +
+                    "failed=\(summary.failedCount) " +
+                    "bytes=\(summary.transferredBytes)"
+                )
+#endif
+            } catch {
+#if DEBUG
+                print("DAYMARK_THUMBNAIL_SYNC_ERROR \(error.localizedDescription)")
 #endif
             }
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-runOriginalSyncExperiment") {
+                await runOriginalSyncExperiment(entries: entries)
+            }
+            if ProcessInfo.processInfo.arguments.contains("-runOriginalInventoryExperiment") {
+                await runOriginalInventoryExperiment()
+            }
+#endif
         }
+    }
+
+    private var thumbnailSyncKey: String {
+        entries
+            .map { "\($0.id):\($0.thumbnailContentHash ?? "")" }
+            .sorted()
+            .joined(separator: "|")
     }
 
 #if DEBUG

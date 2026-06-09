@@ -46,6 +46,7 @@ struct PhotoStore {
     private let calendar = Calendar.current
     private let fileManager = FileManager.default
     private let originalFileStore: OriginalPhotoFileStore
+    private let thumbnailFileStore: ThumbnailPhotoFileStore
     private let exifDateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -58,8 +59,12 @@ struct PhotoStore {
         static let compressionQuality = 0.82
     }
 
-    init(originalsDirectoryURL: URL? = nil) {
+    init(
+        originalsDirectoryURL: URL? = nil,
+        thumbnailsDirectoryURL: URL? = nil
+    ) {
         originalFileStore = OriginalPhotoFileStore(directoryURL: originalsDirectoryURL)
+        thumbnailFileStore = ThumbnailPhotoFileStore(directoryURL: thumbnailsDirectoryURL)
     }
 
     private func normalizedDay(for date: Date) -> Date {
@@ -72,10 +77,18 @@ struct PhotoStore {
 
     func thumbnail(for entry: PhotoEntry) -> UIImage? {
         image(
-            from: entry.thumbnailData ?? originalData(for: entry),
+            from: thumbnailData(for: entry) ?? originalData(for: entry),
             cache: thumbnailCache,
             cacheKey: cacheKey(for: entry, suffix: "thumb")
         )
+    }
+
+    func thumbnailData(for entry: PhotoEntry) -> Data? {
+        if let filename = entry.localThumbnailFilename,
+           let data = try? thumbnailFileStore.read(filename: filename) {
+            return data
+        }
+        return entry.thumbnailData
     }
 
     func originalData(for entry: PhotoEntry) -> Data? {
@@ -92,6 +105,20 @@ struct PhotoStore {
         entry.localOriginalFilename = storedOriginal.filename
         entry.originalByteCount = storedOriginal.byteCount
         entry.originalContentHash = storedOriginal.contentHash
+        invalidateCaches(for: entry)
+    }
+
+    func storeDownloadedThumbnail(
+        _ data: Data,
+        remote: RemoteThumbnailPhoto,
+        for entry: PhotoEntry
+    ) throws {
+        let storedThumbnail = try thumbnailFileStore.write(data, ownerID: entry.id)
+        entry.thumbnailData = nil
+        entry.localThumbnailFilename = storedThumbnail.filename
+        entry.thumbnailByteCount = storedThumbnail.byteCount
+        entry.thumbnailContentHash = storedThumbnail.contentHash
+        entry.thumbnailModifiedAt = remote.modifiedAt
         invalidateCaches(for: entry)
     }
 
@@ -148,12 +175,18 @@ struct PhotoStore {
         let entry = try existingEntry(for: normalizedDate, in: modelContext) ?? PhotoEntry(day: normalizedDate)
         let oldImageData = entry.imageData
         let oldThumbnailData = entry.thumbnailData
+        let oldThumbnailFilename = entry.localThumbnailFilename
+        let oldThumbnailByteCount = entry.thumbnailByteCount
+        let oldThumbnailContentHash = entry.thumbnailContentHash
+        let oldThumbnailModifiedAt = entry.thumbnailModifiedAt
+        let oldThumbnailSyncState = entry.thumbnailSyncState
         let oldImageFilename = entry.imageFilename
         let oldOriginalFilename = entry.localOriginalFilename
         let oldOriginalByteCount = entry.originalByteCount
         let oldOriginalContentHash = entry.originalContentHash
         let oldOriginalSyncState = entry.originalSyncState
         let storedOriginal = try originalFileStore.write(data, ownerID: entry.id)
+        let storedThumbnail = try thumbnailFileStore.write(thumbnailData, ownerID: entry.id)
 
         if entry.modelContext == nil {
             modelContext.insert(entry)
@@ -161,7 +194,12 @@ struct PhotoStore {
 
         entry.day = normalizedDate
         entry.imageData = nil
-        entry.thumbnailData = thumbnailData
+        entry.thumbnailData = nil
+        entry.localThumbnailFilename = storedThumbnail.filename
+        entry.thumbnailByteCount = storedThumbnail.byteCount
+        entry.thumbnailContentHash = storedThumbnail.contentHash
+        entry.thumbnailModifiedAt = .now
+        entry.thumbnailSyncState = .localOnly
         entry.captureDate = captureDate
         entry.imageFilename = nil
         entry.localOriginalFilename = storedOriginal.filename
@@ -193,8 +231,16 @@ struct PhotoStore {
             if oldOriginalFilename != storedOriginal.filename {
                 try? originalFileStore.remove(filename: storedOriginal.filename)
             }
+            if oldThumbnailFilename != storedThumbnail.filename {
+                try? thumbnailFileStore.remove(filename: storedThumbnail.filename)
+            }
             entry.imageData = oldImageData
             entry.thumbnailData = oldThumbnailData
+            entry.localThumbnailFilename = oldThumbnailFilename
+            entry.thumbnailByteCount = oldThumbnailByteCount
+            entry.thumbnailContentHash = oldThumbnailContentHash
+            entry.thumbnailModifiedAt = oldThumbnailModifiedAt
+            entry.thumbnailSyncState = oldThumbnailSyncState
             entry.imageFilename = oldImageFilename
             entry.localOriginalFilename = oldOriginalFilename
             entry.originalByteCount = oldOriginalByteCount
@@ -205,6 +251,9 @@ struct PhotoStore {
 
         if oldOriginalFilename != storedOriginal.filename {
             try? originalFileStore.remove(filename: oldOriginalFilename)
+        }
+        if oldThumbnailFilename != storedThumbnail.filename {
+            try? thumbnailFileStore.remove(filename: oldThumbnailFilename)
         }
         invalidateCaches(for: entry)
     }
@@ -218,15 +267,26 @@ struct PhotoStore {
 
         let oldImageData = entry.imageData
         let oldThumbnailData = entry.thumbnailData
+        let oldThumbnailFilename = entry.localThumbnailFilename
+        let oldThumbnailByteCount = entry.thumbnailByteCount
+        let oldThumbnailContentHash = entry.thumbnailContentHash
+        let oldThumbnailModifiedAt = entry.thumbnailModifiedAt
+        let oldThumbnailSyncState = entry.thumbnailSyncState
         let oldImageFilename = entry.imageFilename
         let oldOriginalFilename = entry.localOriginalFilename
         let oldOriginalByteCount = entry.originalByteCount
         let oldOriginalContentHash = entry.originalContentHash
         let oldOriginalSyncState = entry.originalSyncState
         let storedOriginal = try originalFileStore.write(imageData, ownerID: entry.id)
+        let storedThumbnail = try thumbnailFileStore.write(newThumbnailData, ownerID: entry.id)
 
         entry.imageData = nil
-        entry.thumbnailData = newThumbnailData
+        entry.thumbnailData = nil
+        entry.localThumbnailFilename = storedThumbnail.filename
+        entry.thumbnailByteCount = storedThumbnail.byteCount
+        entry.thumbnailContentHash = storedThumbnail.contentHash
+        entry.thumbnailModifiedAt = .now
+        entry.thumbnailSyncState = .localOnly
         entry.imageFilename = nil
         entry.localOriginalFilename = storedOriginal.filename
         entry.originalByteCount = storedOriginal.byteCount
@@ -239,8 +299,16 @@ struct PhotoStore {
             if oldOriginalFilename != storedOriginal.filename {
                 try? originalFileStore.remove(filename: storedOriginal.filename)
             }
+            if oldThumbnailFilename != storedThumbnail.filename {
+                try? thumbnailFileStore.remove(filename: storedThumbnail.filename)
+            }
             entry.imageData = oldImageData
             entry.thumbnailData = oldThumbnailData
+            entry.localThumbnailFilename = oldThumbnailFilename
+            entry.thumbnailByteCount = oldThumbnailByteCount
+            entry.thumbnailContentHash = oldThumbnailContentHash
+            entry.thumbnailModifiedAt = oldThumbnailModifiedAt
+            entry.thumbnailSyncState = oldThumbnailSyncState
             entry.imageFilename = oldImageFilename
             entry.localOriginalFilename = oldOriginalFilename
             entry.originalByteCount = oldOriginalByteCount
@@ -252,15 +320,20 @@ struct PhotoStore {
         if oldOriginalFilename != storedOriginal.filename {
             try? originalFileStore.remove(filename: oldOriginalFilename)
         }
+        if oldThumbnailFilename != storedThumbnail.filename {
+            try? thumbnailFileStore.remove(filename: oldThumbnailFilename)
+        }
         invalidateCaches(for: entry)
     }
 
     func deleteEntry(_ entry: PhotoEntry, in modelContext: ModelContext) throws {
         let originalFilename = entry.localOriginalFilename
+        let thumbnailFilename = entry.localThumbnailFilename
         invalidateCaches(for: entry)
         modelContext.delete(entry)
         try modelContext.save()
         try? originalFileStore.remove(filename: originalFilename)
+        try? thumbnailFileStore.remove(filename: thumbnailFilename)
     }
 
     func parseBackup(from url: URL) throws -> BackupContents {
@@ -340,26 +413,45 @@ struct PhotoStore {
                 if let filename = backupEntry.imageFilename,
                    let imageData = contents.imageFiles[filename] {
                     let storedOriginal = try originalFileStore.write(imageData, ownerID: entry.id)
+                    let generatedThumbnailData = try thumbnailData(from: imageData)
+                    let storedThumbnail = try thumbnailFileStore.write(generatedThumbnailData, ownerID: entry.id)
                     trackReplacement(
                         oldFilename: entry.localOriginalFilename,
                         newFilename: storedOriginal.filename,
                         replaced: &replacedOriginalFilenames
                     )
                     entry.imageData = nil
-                    entry.thumbnailData = try? thumbnailData(from: imageData)
+                    try? thumbnailFileStore.remove(filename: entry.localThumbnailFilename)
+                    entry.thumbnailData = nil
+                    entry.localThumbnailFilename = storedThumbnail.filename
+                    entry.thumbnailByteCount = storedThumbnail.byteCount
+                    entry.thumbnailContentHash = storedThumbnail.contentHash
+                    entry.thumbnailModifiedAt = .now
+                    entry.thumbnailSyncState = .localOnly
                     entry.localOriginalFilename = storedOriginal.filename
                     entry.originalByteCount = storedOriginal.byteCount
                     entry.originalContentHash = storedOriginal.contentHash
                     entry.originalSyncState = .localOnly
                 } else if let legacyImageData = backupEntry.legacyImageData {
                     let storedOriginal = try originalFileStore.write(legacyImageData, ownerID: entry.id)
+                    let generatedThumbnailData = try (
+                        backupEntry.legacyThumbnailData
+                            ?? thumbnailData(from: legacyImageData)
+                    )
+                    let storedThumbnail = try thumbnailFileStore.write(generatedThumbnailData, ownerID: entry.id)
                     trackReplacement(
                         oldFilename: entry.localOriginalFilename,
                         newFilename: storedOriginal.filename,
                         replaced: &replacedOriginalFilenames
                     )
                     entry.imageData = nil
-                    entry.thumbnailData = backupEntry.legacyThumbnailData ?? (try? thumbnailData(from: legacyImageData))
+                    try? thumbnailFileStore.remove(filename: entry.localThumbnailFilename)
+                    entry.thumbnailData = nil
+                    entry.localThumbnailFilename = storedThumbnail.filename
+                    entry.thumbnailByteCount = storedThumbnail.byteCount
+                    entry.thumbnailContentHash = storedThumbnail.contentHash
+                    entry.thumbnailModifiedAt = .now
+                    entry.thumbnailSyncState = .localOnly
                     entry.localOriginalFilename = storedOriginal.filename
                     entry.originalByteCount = storedOriginal.byteCount
                     entry.originalContentHash = storedOriginal.contentHash
@@ -394,6 +486,50 @@ struct PhotoStore {
                 didUpdate = true
             }
         }
+        if didUpdate {
+            try? modelContext.save()
+        }
+    }
+
+    func migrateEmbeddedThumbnails(
+        for entries: [PhotoEntry],
+        in modelContext: ModelContext
+    ) {
+        var didUpdate = false
+
+        for entry in entries {
+            if let embeddedData = entry.thumbnailData {
+                guard let stored = try? thumbnailFileStore.write(embeddedData, ownerID: entry.id) else {
+                    continue
+                }
+                entry.thumbnailData = nil
+                entry.localThumbnailFilename = stored.filename
+                entry.thumbnailByteCount = stored.byteCount
+                entry.thumbnailContentHash = stored.contentHash
+                entry.thumbnailModifiedAt = entry.thumbnailModifiedAt ?? .now
+                if entry.thumbnailSyncState == .untracked {
+                    entry.thumbnailSyncState = .localOnly
+                }
+                didUpdate = true
+                invalidateCaches(for: entry)
+                continue
+            }
+
+            guard thumbnailData(for: entry) == nil,
+                  let originalData = originalData(for: entry),
+                  let generatedData = try? thumbnailData(from: originalData),
+                  let stored = try? thumbnailFileStore.write(generatedData, ownerID: entry.id) else {
+                continue
+            }
+            entry.localThumbnailFilename = stored.filename
+            entry.thumbnailByteCount = stored.byteCount
+            entry.thumbnailContentHash = stored.contentHash
+            entry.thumbnailModifiedAt = entry.thumbnailModifiedAt ?? .now
+            entry.thumbnailSyncState = .localOnly
+            didUpdate = true
+            invalidateCaches(for: entry)
+        }
+
         if didUpdate {
             try? modelContext.save()
         }
@@ -443,8 +579,15 @@ struct PhotoStore {
             do {
                 let data = try Data(contentsOf: fileURL)
                 let storedOriginal = try originalFileStore.write(data, ownerID: entry.id)
+                let generatedThumbnailData = try thumbnailData(from: data)
+                let storedThumbnail = try thumbnailFileStore.write(generatedThumbnailData, ownerID: entry.id)
                 entry.imageData = nil
-                entry.thumbnailData = try thumbnailData(from: data)
+                entry.thumbnailData = nil
+                entry.localThumbnailFilename = storedThumbnail.filename
+                entry.thumbnailByteCount = storedThumbnail.byteCount
+                entry.thumbnailContentHash = storedThumbnail.contentHash
+                entry.thumbnailModifiedAt = .now
+                entry.thumbnailSyncState = .localOnly
                 entry.captureDate = entry.captureDate ?? captureDate(from: data) ?? entry.day
                 entry.localOriginalFilename = storedOriginal.filename
                 entry.originalByteCount = storedOriginal.byteCount
@@ -511,7 +654,10 @@ struct PhotoStore {
     }
 
     private func cacheKey(for entry: PhotoEntry, suffix: String) -> NSString {
-        "\(entry.id)-\(entry.localOriginalFilename ?? "legacy")-\(suffix)" as NSString
+        let filename = suffix == "thumb"
+            ? entry.localThumbnailFilename ?? "legacy"
+            : entry.localOriginalFilename ?? "legacy"
+        return "\(entry.id)-\(filename)-\(suffix)" as NSString
     }
 
     private func invalidateCaches(for entry: PhotoEntry) {
@@ -648,6 +794,8 @@ struct StoredOriginalPhoto {
     let contentHash: String
 }
 
+typealias StoredThumbnailPhoto = StoredOriginalPhoto
+
 struct OriginalPhotoFileStore {
     private let fileManager: FileManager
     let directoryURL: URL
@@ -702,6 +850,63 @@ struct OriginalPhotoFileStore {
     }
 
     private static func hash(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+struct ThumbnailPhotoFileStore {
+    private let fileManager: FileManager
+    let directoryURL: URL
+
+    init(directoryURL: URL? = nil, fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+        self.directoryURL = directoryURL ?? fileManager.urls(
+            for: .cachesDirectory,
+            in: .userDomainMask
+        )[0]
+        .appendingPathComponent("Daymark", isDirectory: true)
+        .appendingPathComponent("Thumbnails", isDirectory: true)
+    }
+
+    func write(_ data: Data, ownerID: String) throws -> StoredThumbnailPhoto {
+        try fileManager.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true,
+            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
+        )
+
+        let contentHash = hash(data)
+        let ownerHash = hash(Data(ownerID.utf8))
+        let filename = "\(ownerHash.prefix(16))-\(contentHash).thumb"
+        let fileURL = try url(for: filename)
+        try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        return StoredThumbnailPhoto(
+            filename: filename,
+            byteCount: Int64(data.count),
+            contentHash: contentHash
+        )
+    }
+
+    func read(filename: String) throws -> Data {
+        try Data(contentsOf: url(for: filename), options: [.mappedIfSafe])
+    }
+
+    func remove(filename: String?) throws {
+        guard let filename else { return }
+        let fileURL = try url(for: filename)
+        guard fileManager.fileExists(atPath: fileURL.path) else { return }
+        try fileManager.removeItem(at: fileURL)
+    }
+
+    private func url(for filename: String) throws -> URL {
+        guard filename == URL(fileURLWithPath: filename).lastPathComponent,
+              filename.hasSuffix(".thumb") else {
+            throw OriginalPhotoFileStoreError.invalidFilename
+        }
+        return directoryURL.appendingPathComponent(filename, isDirectory: false)
+    }
+
+    private func hash(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }
