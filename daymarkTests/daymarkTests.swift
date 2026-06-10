@@ -11,6 +11,7 @@ final class daymarkTests: XCTestCase {
 
         XCTAssertEqual(entry.metadataSyncState, .untracked)
         XCTAssertEqual(entry.thumbnailSyncState, .untracked)
+        XCTAssertEqual(entry.viewPhotoSyncState, .untracked)
         XCTAssertEqual(entry.originalSyncState, .untracked)
         XCTAssertEqual(entry.overallSyncState, .untracked)
     }
@@ -20,6 +21,7 @@ final class daymarkTests: XCTestCase {
             SyncStateMachine.overallState(
                 metadata: .synced,
                 thumbnail: .pendingDownload,
+                viewPhoto: .synced,
                 original: .uploading
             ),
             .uploading
@@ -28,6 +30,7 @@ final class daymarkTests: XCTestCase {
             SyncStateMachine.overallState(
                 metadata: .failed,
                 thumbnail: .conflict,
+                viewPhoto: .synced,
                 original: .uploading
             ),
             .conflict
@@ -100,6 +103,7 @@ final class daymarkTests: XCTestCase {
             day: Date(timeIntervalSince1970: 1_000),
             metadataSyncState: .synced,
             thumbnailSyncState: .pendingDownload,
+            viewPhotoSyncState: .synced,
             originalSyncState: .localOnly
         )
         writeContext.insert(entry)
@@ -111,6 +115,7 @@ final class daymarkTests: XCTestCase {
 
         XCTAssertEqual(persistedEntry.metadataSyncState, .synced)
         XCTAssertEqual(persistedEntry.thumbnailSyncState, .pendingDownload)
+        XCTAssertEqual(persistedEntry.viewPhotoSyncState, .synced)
         XCTAssertEqual(persistedEntry.originalSyncState, .localOnly)
         XCTAssertEqual(persistedEntry.overallSyncState, .pendingDownload)
     }
@@ -120,16 +125,20 @@ final class daymarkTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let thumbnailDirectoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let viewPhotoDirectoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer {
             try? FileManager.default.removeItem(at: directoryURL)
             try? FileManager.default.removeItem(at: thumbnailDirectoryURL)
+            try? FileManager.default.removeItem(at: viewPhotoDirectoryURL)
         }
 
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
         let store = PhotoStore(
             originalsDirectoryURL: directoryURL,
-            thumbnailsDirectoryURL: thumbnailDirectoryURL
+            thumbnailsDirectoryURL: thumbnailDirectoryURL,
+            viewPhotosDirectoryURL: viewPhotoDirectoryURL
         )
         let imageData = try makeJPEGData()
 
@@ -143,12 +152,17 @@ final class daymarkTests: XCTestCase {
         let entry = try XCTUnwrap(entries.first)
         let filename = try XCTUnwrap(entry.localOriginalFilename)
         let thumbnailFilename = try XCTUnwrap(entry.localThumbnailFilename)
+        let viewPhotoFilename = try XCTUnwrap(entry.localViewPhotoFilename)
 
         XCTAssertNil(entry.imageData)
         XCTAssertNil(entry.thumbnailData)
         XCTAssertNotNil(store.thumbnailData(for: entry))
         XCTAssertEqual(entry.thumbnailSyncState, .localOnly)
         XCTAssertEqual(entry.thumbnailContentHash?.count, 64)
+        XCTAssertNotNil(store.viewPhotoData(for: entry))
+        XCTAssertEqual(entry.viewPhotoSyncState, .localOnly)
+        XCTAssertEqual(entry.viewPhotoContentHash?.count, 64)
+        XCTAssertGreaterThan(try XCTUnwrap(entry.viewPhotoByteCount), 0)
         XCTAssertEqual(entry.originalByteCount, Int64(imageData.count))
         XCTAssertEqual(entry.originalContentHash?.count, 64)
         XCTAssertEqual(entry.originalSyncState, .localOnly)
@@ -159,6 +173,9 @@ final class daymarkTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(
             atPath: thumbnailDirectoryURL.appendingPathComponent(thumbnailFilename).path
         ))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: viewPhotoDirectoryURL.appendingPathComponent(viewPhotoFilename).path
+        ))
 
         try store.deleteEntry(entry, in: context)
 
@@ -168,6 +185,9 @@ final class daymarkTests: XCTestCase {
         ))
         XCTAssertFalse(FileManager.default.fileExists(
             atPath: thumbnailDirectoryURL.appendingPathComponent(thumbnailFilename).path
+        ))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: viewPhotoDirectoryURL.appendingPathComponent(viewPhotoFilename).path
         ))
     }
 
@@ -269,6 +289,106 @@ final class daymarkTests: XCTestCase {
         XCTAssertEqual(entry.thumbnailSyncState, .synced)
         XCTAssertNotEqual(entry.localThumbnailFilename, "filename-from-another-device.thumb")
         XCTAssertEqual(photoStore.thumbnailData(for: entry), data)
+    }
+
+    func testViewPhotoReconcileUploadsLocalAssetAndCountsBytes() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        let data = Data("view-photo-upload".utf8)
+        let stored = try ViewPhotoFileStore(directoryURL: directoryURL)
+            .write(data, ownerID: "view-upload")
+        let entry = PhotoEntry(
+            id: "view-upload",
+            day: .now,
+            localViewPhotoFilename: stored.filename,
+            viewPhotoByteCount: stored.byteCount,
+            viewPhotoContentHash: stored.contentHash,
+            viewPhotoModifiedAt: Date(timeIntervalSince1970: 100),
+            viewPhotoSyncState: .localOnly
+        )
+        context.insert(entry)
+        try context.save()
+        let remoteStore = RecordingViewPhotoRemoteStore()
+
+        let summary = try await ViewPhotoSyncCoordinator(
+            remoteStore: remoteStore,
+            photoStore: PhotoStore(viewPhotosDirectoryURL: directoryURL)
+        ).reconcile(entries: [entry], in: context)
+
+        XCTAssertEqual(summary.uploadedCount, 1)
+        XCTAssertEqual(summary.transferredBytes, Int64(data.count))
+        XCTAssertEqual(summary.pendingDownloadCount, 0)
+        XCTAssertEqual(entry.viewPhotoSyncState, .synced)
+        XCTAssertEqual(remoteStore.uploadRequests.first?.requests.first?.data, data)
+        XCTAssertEqual(remoteStore.downloadRequests, [])
+    }
+
+    func testViewPhotoReconcileMarksRemoteAssetPendingWithoutDownloading() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        let data = Data("view-photo-remote".utf8)
+        let remote = makeRemoteViewPhoto(entryID: "view-remote", data: data)
+        let entry = PhotoEntry(id: remote.entryID, day: .now)
+        context.insert(entry)
+        try context.save()
+        let remoteStore = RecordingViewPhotoRemoteStore(
+            inventory: [entry.id: remote],
+            downloads: [entry.id: data]
+        )
+
+        let summary = try await ViewPhotoSyncCoordinator(
+            remoteStore: remoteStore,
+            photoStore: PhotoStore(viewPhotosDirectoryURL: directoryURL)
+        ).reconcile(entries: [entry], in: context)
+
+        XCTAssertEqual(summary.pendingDownloadCount, 1)
+        XCTAssertEqual(summary.pendingDownloadBytes, Int64(data.count))
+        XCTAssertEqual(summary.transferredBytes, 0)
+        XCTAssertEqual(entry.viewPhotoSyncState, .pendingDownload)
+        XCTAssertNil(entry.localViewPhotoFilename)
+        XCTAssertEqual(remoteStore.downloadRequests, [])
+    }
+
+    func testViewPhotoDownloadOnDemandStoresVerifiedAsset() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        let data = Data("view-photo-demand".utf8)
+        let remote = makeRemoteViewPhoto(entryID: "view-demand", data: data)
+        let entry = PhotoEntry(
+            id: remote.entryID,
+            day: .now,
+            viewPhotoByteCount: remote.byteCount,
+            viewPhotoContentHash: remote.contentHash,
+            viewPhotoModifiedAt: remote.modifiedAt,
+            viewPhotoSyncState: .pendingDownload
+        )
+        context.insert(entry)
+        try context.save()
+        let remoteStore = RecordingViewPhotoRemoteStore(
+            inventory: [entry.id: remote],
+            downloads: [entry.id: data]
+        )
+        let photoStore = PhotoStore(viewPhotosDirectoryURL: directoryURL)
+
+        let downloadedBytes = try await ViewPhotoSyncCoordinator(
+            remoteStore: remoteStore,
+            photoStore: photoStore
+        ).downloadOnDemand(entry: entry, in: context)
+
+        XCTAssertEqual(downloadedBytes, Int64(data.count))
+        XCTAssertEqual(remoteStore.downloadRequests, [entry.id])
+        XCTAssertEqual(entry.viewPhotoSyncState, .synced)
+        XCTAssertEqual(photoStore.viewPhotoData(for: entry), data)
+        XCTAssertNotNil(entry.localViewPhotoFilename)
     }
 
     func testOriginalSyncCoordinatorUploadsPendingOriginal() async throws {
@@ -387,15 +507,20 @@ final class daymarkTests: XCTestCase {
 
     func testOriginalSyncCoordinatorMarksDifferentHashesAsConflict() async throws {
         let fixture = try makeOriginalSyncFixture()
+        let remoteData = Data("remote-conflict-original".utf8)
+        let remoteHash = SHA256.hash(data: remoteData)
+            .map { String(format: "%02x", $0) }
+            .joined()
         let remoteStore = RecordingOriginalRemoteStore(
             inventory: [
                 fixture.entry.id: RemoteOriginalPhoto(
                     entryID: fixture.entry.id,
-                    contentHash: String(repeating: "f", count: 64),
-                    byteCount: 500,
+                    contentHash: remoteHash,
+                    byteCount: Int64(remoteData.count),
                     modifiedAt: .now
                 )
-            ]
+            ],
+            downloads: [fixture.entry.id: remoteData]
         )
 
         let summary = try await OriginalPhotoSyncCoordinator(
@@ -409,10 +534,183 @@ final class daymarkTests: XCTestCase {
             fixture.entry.lastSyncErrorMessage,
             "This device and iCloud contain different original photos."
         )
-        XCTAssertEqual(fixture.entry.originalConflictRemoteHash, String(repeating: "f", count: 64))
-        XCTAssertEqual(fixture.entry.originalConflictRemoteByteCount, 500)
+        XCTAssertEqual(fixture.entry.originalConflictRemoteHash, remoteHash)
+        XCTAssertEqual(fixture.entry.originalConflictRemoteByteCount, Int64(remoteData.count))
         XCTAssertNotNil(fixture.entry.originalConflictDetectedAt)
+        XCTAssertNotNil(fixture.entry.originalConflictRemoteFilename)
+        XCTAssertEqual(fixture.store.conflictOriginalData(for: fixture.entry), remoteData)
         XCTAssertTrue(remoteStore.uploadRequests.isEmpty)
+    }
+
+    func testOriginalSyncUploadsLocalReplacementWhenCloudStillMatchesBase() async throws {
+        let fixture = try makeOriginalSyncFixture()
+        let baseHash = String(repeating: "b", count: 64)
+        fixture.entry.originalLastSyncedHash = baseHash
+        let remoteStore = RecordingOriginalRemoteStore(
+            inventory: [
+                fixture.entry.id: RemoteOriginalPhoto(
+                    entryID: fixture.entry.id,
+                    contentHash: baseHash,
+                    byteCount: 20,
+                    modifiedAt: .now
+                )
+            ]
+        )
+
+        let summary = try await OriginalPhotoSyncCoordinator(
+            remoteStore: remoteStore,
+            photoStore: fixture.store
+        ).syncOriginals(entries: [fixture.entry], in: fixture.context, limits: .unlimited)
+
+        XCTAssertEqual(summary.uploadedCount, 1)
+        XCTAssertEqual(summary.conflictCount, 0)
+        XCTAssertEqual(remoteStore.uploadRequests.first?.overwrite, true)
+        XCTAssertEqual(fixture.entry.originalLastSyncedHash, fixture.entry.originalContentHash)
+    }
+
+    func testOriginalSyncDownloadsRemoteReplacementWhenLocalStillMatchesBase() async throws {
+        let fixture = try makeOriginalSyncFixture()
+        let baseHash = try XCTUnwrap(fixture.entry.originalContentHash)
+        let remoteData = Data("remote-replacement".utf8)
+        let remoteHash = SHA256.hash(data: remoteData)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        fixture.entry.originalLastSyncedHash = baseHash
+        let remoteStore = RecordingOriginalRemoteStore(
+            inventory: [
+                fixture.entry.id: RemoteOriginalPhoto(
+                    entryID: fixture.entry.id,
+                    contentHash: remoteHash,
+                    byteCount: Int64(remoteData.count),
+                    modifiedAt: .now
+                )
+            ],
+            downloads: [fixture.entry.id: remoteData]
+        )
+
+        let summary = try await OriginalPhotoSyncCoordinator(
+            remoteStore: remoteStore,
+            photoStore: fixture.store
+        ).syncOriginals(entries: [fixture.entry], in: fixture.context, limits: .unlimited)
+
+        XCTAssertEqual(summary.downloadedCount, 1)
+        XCTAssertEqual(summary.conflictCount, 0)
+        XCTAssertEqual(remoteStore.downloadRequests, [fixture.entry.id])
+        XCTAssertEqual(fixture.store.originalData(for: fixture.entry), remoteData)
+        XCTAssertEqual(fixture.entry.originalLastSyncedHash, remoteHash)
+    }
+
+    func testMetadataMergeKeepsIndependentOfflineEdits() {
+        let baseDate = Date(timeIntervalSince1970: 100)
+        let newerDate = Date(timeIntervalSince1970: 200)
+        let entry = PhotoEntry(day: .now, city: "Local City", caption: "Local Caption")
+        let local = VersionedMetadata(
+            snapshot: MetadataSnapshot(entry: entry),
+            versions: [
+                "city": MetadataFieldVersion(modifiedAt: newerDate, deviceID: "A"),
+                "caption": MetadataFieldVersion(modifiedAt: baseDate, deviceID: "A"),
+            ]
+        )
+        entry.city = "Remote City"
+        entry.caption = "Remote Caption"
+        let remote = VersionedMetadata(
+            snapshot: MetadataSnapshot(entry: entry),
+            versions: [
+                "city": MetadataFieldVersion(modifiedAt: baseDate, deviceID: "B"),
+                "caption": MetadataFieldVersion(modifiedAt: newerDate, deviceID: "B"),
+            ]
+        )
+
+        let merged = MetadataSyncCoordinator(
+            remoteStore: RecordingMetadataRemoteStore(),
+            deviceID: "A"
+        ).merge(local: local, remote: remote)
+
+        XCTAssertEqual(merged.snapshot.city, "Local City")
+        XCTAssertEqual(merged.snapshot.caption, "Remote Caption")
+    }
+
+    func testMetadataSyncAppliesRemoteFieldAndUploadsMergedRecord() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let entry = PhotoEntry(day: .now, city: "Shanghai", caption: "Local")
+        context.insert(entry)
+        let coordinator = MetadataSyncCoordinator(
+            remoteStore: RecordingMetadataRemoteStore(),
+            deviceID: "local-device"
+        )
+        let local = coordinator.captureLocalChanges(
+            for: entry,
+            at: Date(timeIntervalSince1970: 100)
+        )
+        entry.caption = "Local edit"
+        let remoteEntry = PhotoEntry(day: entry.day, city: "Tokyo", caption: "Local")
+        let remote = VersionedMetadata(
+            snapshot: MetadataSnapshot(entry: remoteEntry),
+            versions: local.versions.merging([
+                "city": MetadataFieldVersion(
+                    modifiedAt: Date(timeIntervalSince1970: 300),
+                    deviceID: "remote-device"
+                )
+            ]) { _, new in new }
+        )
+        let remoteStore = RecordingMetadataRemoteStore(
+            inventory: [entry.id: RemoteMetadataRecord(entryID: entry.id, metadata: remote)]
+        )
+
+        let summary = try await MetadataSyncCoordinator(
+            remoteStore: remoteStore,
+            deviceID: "local-device"
+        ).sync(entries: [entry], in: context)
+
+        XCTAssertEqual(entry.city, "Tokyo")
+        XCTAssertEqual(entry.caption, "Local edit")
+        XCTAssertEqual(summary.mergedCount, 1)
+        XCTAssertEqual(summary.uploadedCount, 1)
+        XCTAssertEqual(remoteStore.uploadedRecords.first?.metadata.snapshot.city, "Tokyo")
+        XCTAssertEqual(remoteStore.uploadedRecords.first?.metadata.snapshot.caption, "Local edit")
+    }
+
+    func testSyncStatusSnapshotUsesRealPendingBytes() {
+        let upload = PhotoEntry(
+            day: .now,
+            viewPhotoByteCount: 1_024,
+            viewPhotoSyncState: .pendingUpload
+        )
+        let download = PhotoEntry(
+            day: .now,
+            originalByteCount: 4_096,
+            originalSyncState: .pendingDownload
+        )
+        let store = SyncEngineStatusStore.shared
+
+        store.refresh(entries: [upload, download])
+
+        XCTAssertEqual(store.snapshot.pendingUploadCount, 1)
+        XCTAssertEqual(store.snapshot.pendingUploadBytes, 1_024)
+        XCTAssertEqual(store.snapshot.pendingDownloadCount, 1)
+        XCTAssertEqual(store.snapshot.pendingDownloadBytes, 4_096)
+    }
+
+    func testSyncStatusRequiresAttentionWhilePhotoConflictExists() {
+        let conflict = PhotoEntry(
+            day: .now,
+            originalSyncState: .conflict
+        )
+        conflict.recordOriginalConflict(
+            remote: RemoteOriginalPhoto(
+                entryID: conflict.id,
+                contentHash: String(repeating: "c", count: 64),
+                byteCount: 512,
+                modifiedAt: .now
+            )
+        )
+        let store = SyncEngineStatusStore.shared
+
+        store.finish(entries: [conflict], confirmed: false)
+
+        XCTAssertEqual(store.snapshot.phase, "Needs Attention")
+        XCTAssertEqual(store.snapshot.conflicts.count, 1)
     }
 
     func testConflictResolverKeepsLocalAndOverwritesRemote() async throws {
@@ -471,6 +769,36 @@ final class daymarkTests: XCTestCase {
         XCTAssertNil(fixture.entry.originalConflictRemoteHash)
         XCTAssertEqual(fixture.store.originalData(for: fixture.entry), cloudData)
         XCTAssertEqual(fixture.entry.originalContentHash, cloudHash)
+    }
+
+    func testConflictResolverUsesPreservedICloudOriginalWithoutNetwork() async throws {
+        let fixture = try makeOriginalSyncFixture()
+        let cloudData = Data("preserved-icloud-wins".utf8)
+        let cloudHash = SHA256.hash(data: cloudData)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let stored = try fixture.store.storeConflictOriginal(cloudData, for: fixture.entry)
+        fixture.entry.originalSyncState = .conflict
+        fixture.entry.recordOriginalConflict(
+            remote: RemoteOriginalPhoto(
+                entryID: fixture.entry.id,
+                contentHash: cloudHash,
+                byteCount: Int64(cloudData.count),
+                modifiedAt: .now
+            ),
+            filename: stored.filename
+        )
+        let remoteStore = RecordingOriginalRemoteStore()
+
+        try await OriginalPhotoConflictResolver(
+            remoteStore: remoteStore,
+            photoStore: fixture.store
+        ).useICloud(fixture.entry, in: fixture.context)
+
+        XCTAssertEqual(remoteStore.downloadRequests, [])
+        XCTAssertEqual(fixture.store.originalData(for: fixture.entry), cloudData)
+        XCTAssertNil(fixture.entry.originalConflictRemoteFilename)
+        XCTAssertEqual(fixture.entry.originalConflictResolution, .usedICloud)
     }
 
     func testConflictResolverRejectsUnverifiedICloudOriginal() async throws {
@@ -591,6 +919,17 @@ final class daymarkTests: XCTestCase {
         return try XCTUnwrap(image.jpegData(compressionQuality: 0.9))
     }
 
+    private func makeRemoteViewPhoto(entryID: String, data: Data) -> RemoteViewPhoto {
+        RemoteViewPhoto(
+            entryID: entryID,
+            contentHash: SHA256.hash(data: data)
+                .map { String(format: "%02x", $0) }
+                .joined(),
+            byteCount: Int64(data.count),
+            modifiedAt: Date(timeIntervalSince1970: 200)
+        )
+    }
+
     private func makeOriginalSyncFixture(entryID: String = "sync-entry") throws -> (
         context: ModelContext,
         entry: PhotoEntry,
@@ -615,7 +954,16 @@ final class daymarkTests: XCTestCase {
         )
         context.insert(entry)
         try context.save()
-        return (context, entry, PhotoStore(originalsDirectoryURL: directoryURL), data, directoryURL)
+        return (
+            context,
+            entry,
+            PhotoStore(
+                originalsDirectoryURL: directoryURL,
+                conflictPhotosDirectoryURL: directoryURL.appendingPathComponent("conflicts")
+            ),
+            data,
+            directoryURL
+        )
     }
 }
 
@@ -627,6 +975,7 @@ private final class RecordingOriginalRemoteStore: OriginalPhotoRemoteStore {
     }
 
     private(set) var uploadRequests: [RecordedUpload] = []
+    private(set) var downloadRequests: [String] = []
     private let remoteInventory: [String: RemoteOriginalPhoto]
     private let downloads: [String: Data]
     private let uploadError: Error?
@@ -653,6 +1002,7 @@ private final class RecordingOriginalRemoteStore: OriginalPhotoRemoteStore {
     }
 
     func download(entryID: String) async throws -> Data {
+        downloadRequests.append(entryID)
         guard let data = downloads[entryID] else {
             throw OriginalPhotoSyncError.missingRemoteAsset
         }
@@ -708,6 +1058,62 @@ private final class RecordingThumbnailRemoteStore: ThumbnailPhotoRemoteStore {
             result[entryID] = try await download(entryID: entryID)
         }
         return result
+    }
+}
+
+@MainActor
+private final class RecordingMetadataRemoteStore: MetadataRemoteStore {
+    private(set) var uploadedRecords: [RemoteMetadataRecord] = []
+    private let remoteInventory: [String: RemoteMetadataRecord]
+
+    init(inventory: [String: RemoteMetadataRecord] = [:]) {
+        remoteInventory = inventory
+    }
+
+    func inventory() async throws -> [String: RemoteMetadataRecord] {
+        remoteInventory
+    }
+
+    func upload(_ records: [RemoteMetadataRecord]) async throws {
+        uploadedRecords.append(contentsOf: records)
+    }
+}
+
+@MainActor
+private final class RecordingViewPhotoRemoteStore: ViewPhotoRemoteStore {
+    struct RecordedUpload {
+        let requests: [ViewPhotoUploadRequest]
+        let overwrite: Bool
+    }
+
+    private(set) var uploadRequests: [RecordedUpload] = []
+    private(set) var downloadRequests: [String] = []
+    private let remoteInventory: [String: RemoteViewPhoto]
+    private let downloads: [String: Data]
+
+    init(
+        inventory: [String: RemoteViewPhoto] = [:],
+        downloads: [String: Data] = [:]
+    ) {
+        remoteInventory = inventory
+        self.downloads = downloads
+    }
+
+    func inventory() async throws -> [String: RemoteViewPhoto] {
+        remoteInventory
+    }
+
+    func upload(_ requests: [ViewPhotoUploadRequest], overwrite: Bool) async throws {
+        uploadRequests.append(RecordedUpload(requests: requests, overwrite: overwrite))
+    }
+
+    func download(entryID: String) async throws -> DownloadedViewPhoto {
+        downloadRequests.append(entryID)
+        guard let remote = remoteInventory[entryID],
+              let data = downloads[entryID] else {
+            throw ViewPhotoSyncError.missingRemoteAsset
+        }
+        return DownloadedViewPhoto(remote: remote, data: data)
     }
 }
 

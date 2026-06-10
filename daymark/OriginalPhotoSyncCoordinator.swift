@@ -53,6 +53,8 @@ struct OriginalPhotoSyncSummary {
     var skippedCount = 0
     var deferredCount = 0
     var transferredBytes: Int64 = 0
+    var uploadedBytes: Int64 = 0
+    var downloadedBytes: Int64 = 0
     var attemptedTransferCount = 0
     var attemptedBytes: Int64 = 0
 }
@@ -97,11 +99,86 @@ struct OriginalPhotoSyncCoordinator {
             if let localData, let remote {
                 let localHash = entry.originalContentHash ?? Self.hash(localData)
                 if localHash == remote.contentHash {
-                    markSynced(entry)
+                    markSynced(entry, contentHash: localHash)
                     summary.skippedCount += 1
+                } else if let baseHash = entry.originalLastSyncedHash,
+                          remote.contentHash == baseHash {
+                    let byteCount = Int64(localData.count)
+                    guard canTransfer(byteCount, summary: summary, limits: limits) else {
+                        _ = entry.transitionSyncState(for: .original, to: .pendingUpload)
+                        summary.deferredCount += 1
+                        continue
+                    }
+                    _ = entry.transitionSyncState(for: .original, to: .pendingUpload)
+                    _ = entry.transitionSyncState(for: .original, to: .uploading)
+                    summary.attemptedTransferCount += 1
+                    summary.attemptedBytes += byteCount
+                    do {
+                        try await remoteStore.upload(
+                            OriginalPhotoUploadRequest(
+                                entryID: entry.id,
+                                data: localData,
+                                contentHash: localHash,
+                                byteCount: byteCount,
+                                modifiedAt: .now
+                            ),
+                            overwrite: true
+                        )
+                        markSynced(entry, contentHash: localHash)
+                        summary.uploadedCount += 1
+                        summary.transferredBytes += byteCount
+                        summary.uploadedBytes += byteCount
+                    } catch {
+                        markFailed(entry, message: error.localizedDescription)
+                        summary.failedCount += 1
+                    }
+                } else if let baseHash = entry.originalLastSyncedHash,
+                          localHash == baseHash {
+                    guard canTransfer(remote.byteCount, summary: summary, limits: limits) else {
+                        _ = entry.transitionSyncState(for: .original, to: .pendingDownload)
+                        summary.deferredCount += 1
+                        continue
+                    }
+                    _ = entry.transitionSyncState(for: .original, to: .pendingDownload)
+                    _ = entry.transitionSyncState(for: .original, to: .downloading)
+                    summary.attemptedTransferCount += 1
+                    summary.attemptedBytes += remote.byteCount
+                    do {
+                        let data = try await remoteStore.download(entryID: entry.id)
+                        guard Self.hash(data) == remote.contentHash else {
+                            throw OriginalPhotoSyncError.downloadHashMismatch
+                        }
+                        try photoStore.storeDownloadedOriginal(data, for: entry)
+                        markSynced(entry, contentHash: remote.contentHash)
+                        summary.downloadedCount += 1
+                        summary.transferredBytes += Int64(data.count)
+                        summary.downloadedBytes += Int64(data.count)
+                    } catch {
+                        markFailed(entry, message: error.localizedDescription)
+                        summary.failedCount += 1
+                    }
                 } else {
-                    markConflict(entry, remote: remote)
-                    summary.conflictCount += 1
+                    do {
+                        let filename: String
+                        if entry.originalConflictRemoteHash == remote.contentHash,
+                           photoStore.conflictOriginalData(for: entry) != nil,
+                           let existing = entry.originalConflictRemoteFilename {
+                            filename = existing
+                        } else {
+                            let data = try await remoteStore.download(entryID: entry.id)
+                            guard Self.hash(data) == remote.contentHash else {
+                                throw OriginalPhotoSyncError.downloadHashMismatch
+                            }
+                            filename = try photoStore.storeConflictOriginal(data, for: entry).filename
+                            summary.transferredBytes += Int64(data.count)
+                            summary.downloadedBytes += Int64(data.count)
+                        }
+                        markConflict(entry, remote: remote, filename: filename)
+                        summary.conflictCount += 1
+                    } catch {
+                        markFailed(entry, message: error.localizedDescription)
+                        summary.failedCount += 1
+                    }
                 }
                 try? modelContext.save()
                 continue
@@ -126,9 +203,10 @@ struct OriginalPhotoSyncCoordinator {
                         throw OriginalPhotoSyncError.downloadHashMismatch
                     }
                     try photoStore.storeDownloadedOriginal(data, for: entry)
-                    _ = entry.transitionSyncState(for: .original, to: .synced)
+                    markSynced(entry, contentHash: remote.contentHash)
                     summary.downloadedCount += 1
                     summary.transferredBytes += Int64(data.count)
+                    summary.downloadedBytes += Int64(data.count)
                 } catch {
                     markFailed(entry, message: error.localizedDescription)
                     summary.failedCount += 1
@@ -175,8 +253,10 @@ struct OriginalPhotoSyncCoordinator {
                     )
                 )
                 _ = entry.transitionSyncState(for: .original, to: .synced)
+                entry.originalLastSyncedHash = contentHash
                 summary.uploadedCount += 1
                 summary.transferredBytes += byteCount
+                summary.uploadedBytes += byteCount
             } catch {
                 markFailed(entry, message: error.localizedDescription)
                 summary.failedCount += 1
@@ -196,7 +276,7 @@ struct OriginalPhotoSyncCoordinator {
         return byteCount <= limits.maximumTransferredBytes - summary.attemptedBytes
     }
 
-    private func markSynced(_ entry: PhotoEntry) {
+    private func markSynced(_ entry: PhotoEntry, contentHash: String) {
         if !entry.transitionSyncState(for: .original, to: .synced) {
             entry.originalSyncState = .synced
             entry.syncStateUpdatedAt = .now
@@ -205,16 +285,21 @@ struct OriginalPhotoSyncCoordinator {
             entry.lastSyncErrorComponentRaw = nil
             entry.lastSyncErrorMessage = nil
         }
+        entry.originalLastSyncedHash = contentHash
     }
 
-    private func markConflict(_ entry: PhotoEntry, remote: RemoteOriginalPhoto) {
+    private func markConflict(
+        _ entry: PhotoEntry,
+        remote: RemoteOriginalPhoto,
+        filename: String
+    ) {
         if !entry.transitionSyncState(for: .original, to: .conflict) {
             entry.originalSyncState = .conflict
             entry.syncStateUpdatedAt = .now
         }
         entry.lastSyncErrorComponentRaw = SyncComponent.original.rawValue
         entry.lastSyncErrorMessage = OriginalPhotoSyncError.contentConflict.localizedDescription
-        entry.recordOriginalConflict(remote: remote)
+        entry.recordOriginalConflict(remote: remote, filename: filename)
     }
 
     private func markFailed(_ entry: PhotoEntry, message: String) {
@@ -366,6 +451,8 @@ struct OriginalPhotoConflictResolver {
 
         entry.originalContentHash = contentHash
         entry.originalByteCount = byteCount
+        entry.originalLastSyncedHash = contentHash
+        photoStore.removeConflictOriginal(for: entry)
         entry.clearOriginalConflict(resolution: .keptLocal)
         markResolved(entry)
         try modelContext.save()
@@ -377,12 +464,19 @@ struct OriginalPhotoConflictResolver {
             throw OriginalPhotoSyncError.missingConflictSnapshot
         }
 
-        let data = try await remoteStore.download(entryID: entry.id)
+        let data: Data
+        if let preserved = photoStore.conflictOriginalData(for: entry) {
+            data = preserved
+        } else {
+            data = try await remoteStore.download(entryID: entry.id)
+        }
         guard Self.hash(data) == remoteHash else {
             throw OriginalPhotoSyncError.downloadHashMismatch
         }
 
         try photoStore.storeDownloadedOriginal(data, for: entry)
+        entry.originalLastSyncedHash = remoteHash
+        photoStore.removeConflictOriginal(for: entry)
         entry.clearOriginalConflict(resolution: .usedICloud)
         markResolved(entry)
         try modelContext.save()

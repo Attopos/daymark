@@ -233,7 +233,8 @@ struct SettingsView: View {
     }
 }
 
-struct ICloudSyncDetailView: View {
+#if false
+struct LegacyICloudSyncDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \PhotoEntry.day, order: .reverse) private var entries: [PhotoEntry]
     @AppStorage("lastSuccessfulSyncTimestamp") private var lastSuccessfulSyncTimestamp: Double = 0
@@ -283,6 +284,30 @@ struct ICloudSyncDetailView: View {
 
     private var failedOriginalCount: Int {
         entries.count { $0.originalSyncState == .failed }
+    }
+
+    private var pendingViewUploadEntries: [PhotoEntry] {
+        entries.filter {
+            [.localOnly, .pendingUpload, .uploading].contains($0.viewPhotoSyncState)
+        }
+    }
+
+    private var pendingViewDownloadEntries: [PhotoEntry] {
+        entries.filter {
+            [.pendingDownload, .downloading].contains($0.viewPhotoSyncState)
+        }
+    }
+
+    private var failedViewPhotoCount: Int {
+        entries.count { $0.viewPhotoSyncState == .failed }
+    }
+
+    private var pendingViewUploadBytes: Int64 {
+        pendingViewUploadEntries.reduce(0) { $0 + ($1.viewPhotoByteCount ?? 0) }
+    }
+
+    private var pendingViewDownloadBytes: Int64 {
+        pendingViewDownloadEntries.reduce(0) { $0 + ($1.viewPhotoByteCount ?? 0) }
     }
 
     private var conflictedEntries: [PhotoEntry] {
@@ -350,6 +375,26 @@ struct ICloudSyncDetailView: View {
                 LabeledContent("Originals Pending") {
                     Text("\(pendingOriginalCount)")
                         .foregroundStyle(pendingOriginalCount == 0 ? Color.primary : Color.orange)
+                }
+                LabeledContent("Viewing Photos to Upload") {
+                    Text(pendingDescription(
+                        count: pendingViewUploadEntries.count,
+                        bytes: pendingViewUploadBytes
+                    ))
+                    .foregroundStyle(pendingViewUploadEntries.isEmpty ? Color.primary : Color.orange)
+                }
+                LabeledContent("Viewing Photos on Demand") {
+                    Text(pendingDescription(
+                        count: pendingViewDownloadEntries.count,
+                        bytes: pendingViewDownloadBytes
+                    ))
+                    .foregroundStyle(pendingViewDownloadEntries.isEmpty ? Color.primary : Color.blue)
+                }
+                if failedViewPhotoCount > 0 {
+                    LabeledContent("Viewing Photos Failed") {
+                        Text("\(failedViewPhotoCount)")
+                            .foregroundStyle(.red)
+                    }
                 }
                 if failedOriginalCount > 0 {
                     LabeledContent("Originals Failed") {
@@ -533,13 +578,17 @@ struct ICloudSyncDetailView: View {
         }
 
         refreshLocalCount()
-        syncMessage = pendingOriginalCount + failedOriginalCount > 0
-            ? "Uploading original photos..."
+        syncMessage = pendingViewUploadEntries.count + failedViewPhotoCount > 0
+            ? "Uploading viewing photos..."
             : "Checking for pending changes..."
         startProgressPolling()
 
         do {
             let thumbnailSummary = try await ThumbnailPhotoSyncCoordinator().syncThumbnails(
+                entries: entries,
+                in: modelContext
+            )
+            let viewSummary = try await ViewPhotoSyncCoordinator().reconcile(
                 entries: entries,
                 in: modelContext
             )
@@ -549,15 +598,16 @@ struct ICloudSyncDetailView: View {
             )
             let transferred = summary.uploadedCount + summary.downloadedCount
             let thumbnailTransferred = thumbnailSummary.uploadedCount + thumbnailSummary.downloadedCount
+            let viewTransferred = viewSummary.uploadedCount
 
-            if summary.conflictCount > 0 || summary.failedCount > 0 || thumbnailSummary.failedCount > 0 {
-                syncMessage = "\(thumbnailTransferred) thumbnails and \(transferred) originals transferred. \(summary.conflictCount) conflicts, \(summary.failedCount + thumbnailSummary.failedCount) failed."
+            if summary.conflictCount > 0 || summary.failedCount > 0 || thumbnailSummary.failedCount > 0 || viewSummary.failedCount > 0 {
+                syncMessage = "\(thumbnailTransferred) thumbnails, \(viewTransferred) viewing photos, and \(transferred) originals transferred. \(summary.conflictCount) conflicts, \(summary.failedCount + thumbnailSummary.failedCount + viewSummary.failedCount) failed."
             } else if summary.deferredCount > 0 {
-                syncMessage = "\(thumbnailTransferred) thumbnails and \(transferred) originals transferred. \(summary.deferredCount) originals remain for the next batch."
-            } else if transferred > 0 || thumbnailTransferred > 0 {
-                syncMessage = "Transferred \(thumbnailTransferred) thumbnails and \(transferred) originals."
+                syncMessage = "\(thumbnailTransferred) thumbnails, \(viewTransferred) viewing photos, and \(transferred) originals transferred. \(summary.deferredCount) originals remain for the next batch."
+            } else if transferred > 0 || thumbnailTransferred > 0 || viewTransferred > 0 {
+                syncMessage = "Transferred \(thumbnailTransferred) thumbnails, \(viewTransferred) viewing photos, and \(transferred) originals."
             } else {
-                syncMessage = "Photos and thumbnails are up to date. Metadata sync continues automatically."
+                syncMessage = "Photos are up to date. Viewing photos download when opened."
             }
         } catch {
             syncMessage = describeCloudKitError(error)
@@ -589,6 +639,10 @@ struct ICloudSyncDetailView: View {
     private func formattedByteCount(_ byteCount: Int64?) -> String {
         guard let byteCount else { return "Unknown" }
         return ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
+    }
+
+    private func pendingDescription(count: Int, bytes: Int64) -> String {
+        "\(count) · \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))"
     }
 
     private var conflictDialogBinding: Binding<Bool> {
@@ -878,6 +932,7 @@ private struct SyncActivity: Identifiable {
         }
     }
 }
+#endif
 
 #Preview {
     SettingsView(prefersDarkMode: .constant(false))

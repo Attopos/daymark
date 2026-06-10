@@ -11,11 +11,16 @@ final class PhotoEntry {
     var imageFilename: String?
     var localOriginalFilename: String?
     var localThumbnailFilename: String?
+    var localViewPhotoFilename: String?
     var originalByteCount: Int64?
     var originalContentHash: String?
+    var originalLastSyncedHash: String?
     var thumbnailByteCount: Int64?
     var thumbnailContentHash: String?
     var thumbnailModifiedAt: Date?
+    var viewPhotoByteCount: Int64?
+    var viewPhotoContentHash: String?
+    var viewPhotoModifiedAt: Date?
     var latitude: Double?
     var longitude: Double?
     var timezone: String?
@@ -25,13 +30,17 @@ final class PhotoEntry {
     var caption: String?
     var metadataSyncStateRaw: String = SyncState.untracked.rawValue
     var thumbnailSyncStateRaw: String = SyncState.untracked.rawValue
+    var viewPhotoSyncStateRaw: String = SyncState.untracked.rawValue
     var originalSyncStateRaw: String = SyncState.untracked.rawValue
     var syncStateUpdatedAt: Date?
     var lastSyncErrorComponentRaw: String?
     var lastSyncErrorMessage: String?
+    @Attribute(.externalStorage) var metadataVersionData: Data?
+    @Attribute(.externalStorage) var metadataBaselineData: Data?
     var originalConflictRemoteHash: String?
     var originalConflictRemoteByteCount: Int64?
     var originalConflictRemoteModifiedAt: Date?
+    var originalConflictRemoteFilename: String?
     var originalConflictDetectedAt: Date?
     var originalConflictResolutionRaw: String?
 
@@ -44,11 +53,16 @@ final class PhotoEntry {
         imageFilename: String? = nil,
         localOriginalFilename: String? = nil,
         localThumbnailFilename: String? = nil,
+        localViewPhotoFilename: String? = nil,
         originalByteCount: Int64? = nil,
         originalContentHash: String? = nil,
+        originalLastSyncedHash: String? = nil,
         thumbnailByteCount: Int64? = nil,
         thumbnailContentHash: String? = nil,
         thumbnailModifiedAt: Date? = nil,
+        viewPhotoByteCount: Int64? = nil,
+        viewPhotoContentHash: String? = nil,
+        viewPhotoModifiedAt: Date? = nil,
         latitude: Double? = nil,
         longitude: Double? = nil,
         timezone: String? = nil,
@@ -58,6 +72,7 @@ final class PhotoEntry {
         caption: String? = nil,
         metadataSyncState: SyncState = .untracked,
         thumbnailSyncState: SyncState = .untracked,
+        viewPhotoSyncState: SyncState = .untracked,
         originalSyncState: SyncState = .untracked
     ) {
         self.id = id
@@ -68,11 +83,16 @@ final class PhotoEntry {
         self.imageFilename = imageFilename
         self.localOriginalFilename = localOriginalFilename
         self.localThumbnailFilename = localThumbnailFilename
+        self.localViewPhotoFilename = localViewPhotoFilename
         self.originalByteCount = originalByteCount
         self.originalContentHash = originalContentHash
+        self.originalLastSyncedHash = originalLastSyncedHash
         self.thumbnailByteCount = thumbnailByteCount
         self.thumbnailContentHash = thumbnailContentHash
         self.thumbnailModifiedAt = thumbnailModifiedAt
+        self.viewPhotoByteCount = viewPhotoByteCount
+        self.viewPhotoContentHash = viewPhotoContentHash
+        self.viewPhotoModifiedAt = viewPhotoModifiedAt
         self.latitude = latitude
         self.longitude = longitude
         self.timezone = timezone
@@ -82,6 +102,7 @@ final class PhotoEntry {
         self.caption = caption
         self.metadataSyncStateRaw = metadataSyncState.rawValue
         self.thumbnailSyncStateRaw = thumbnailSyncState.rawValue
+        self.viewPhotoSyncStateRaw = viewPhotoSyncState.rawValue
         self.originalSyncStateRaw = originalSyncState.rawValue
     }
 
@@ -111,10 +132,16 @@ extension PhotoEntry {
         set { originalSyncStateRaw = newValue.rawValue }
     }
 
+    var viewPhotoSyncState: SyncState {
+        get { SyncState(rawValue: viewPhotoSyncStateRaw) ?? .untracked }
+        set { viewPhotoSyncStateRaw = newValue.rawValue }
+    }
+
     var overallSyncState: SyncState {
         SyncStateMachine.overallState(
             metadata: metadataSyncState,
             thumbnail: thumbnailSyncState,
+            viewPhoto: viewPhotoSyncState,
             original: originalSyncState
         )
     }
@@ -127,10 +154,15 @@ extension PhotoEntry {
         set { originalConflictResolutionRaw = newValue?.rawValue }
     }
 
-    func recordOriginalConflict(remote: RemoteOriginalPhoto, at date: Date = .now) {
+    func recordOriginalConflict(
+        remote: RemoteOriginalPhoto,
+        filename: String? = nil,
+        at date: Date = .now
+    ) {
         originalConflictRemoteHash = remote.contentHash
         originalConflictRemoteByteCount = remote.byteCount
         originalConflictRemoteModifiedAt = remote.modifiedAt
+        originalConflictRemoteFilename = filename
         originalConflictDetectedAt = date
         originalConflictResolution = nil
     }
@@ -139,6 +171,7 @@ extension PhotoEntry {
         originalConflictRemoteHash = nil
         originalConflictRemoteByteCount = nil
         originalConflictRemoteModifiedAt = nil
+        originalConflictRemoteFilename = nil
         originalConflictDetectedAt = nil
         originalConflictResolution = resolution
     }
@@ -173,6 +206,7 @@ extension PhotoEntry {
         switch component {
         case .metadata: metadataSyncState
         case .thumbnail: thumbnailSyncState
+        case .viewPhoto: viewPhotoSyncState
         case .original: originalSyncState
         }
     }
@@ -181,6 +215,7 @@ extension PhotoEntry {
         switch component {
         case .metadata: metadataSyncState = state
         case .thumbnail: thumbnailSyncState = state
+        case .viewPhoto: viewPhotoSyncState = state
         case .original: originalSyncState = state
         }
     }
@@ -189,6 +224,7 @@ extension PhotoEntry {
 enum SyncComponent: String, CaseIterable, Codable {
     case metadata
     case thumbnail
+    case viewPhoto
     case original
 }
 
@@ -238,9 +274,10 @@ enum SyncStateMachine {
     static func overallState(
         metadata: SyncState,
         thumbnail: SyncState,
+        viewPhoto: SyncState,
         original: SyncState
     ) -> SyncState {
-        let states = [metadata, thumbnail, original]
+        let states = [metadata, thumbnail, viewPhoto, original]
         let priority: [SyncState] = [
             .conflict,
             .failed,

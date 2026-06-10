@@ -26,7 +26,7 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(prefersDarkMode ? .dark : .light)
-        .task(id: thumbnailSyncKey) {
+        .task(id: assetSyncKey) {
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-runMetadataSyncExperiment") {
                 await MetadataSyncExperiment.run(
@@ -39,23 +39,17 @@ struct ContentView: View {
             await photoStore.migrateLegacyLibraryIfNeeded(in: modelContext)
             photoStore.backfillMetadata(for: entries, in: modelContext)
             photoStore.migrateEmbeddedThumbnails(for: entries, in: modelContext)
+            await photoStore.backfillViewPhotos(for: entries, in: modelContext)
             do {
-                let summary = try await ThumbnailPhotoSyncCoordinator().syncThumbnails(
+                try await SyncEngine().sync(
                     entries: entries,
-                    in: modelContext
+                    in: modelContext,
+                    includeOriginals: false
                 )
-#if DEBUG
-                print(
-                    "DAYMARK_THUMBNAIL_SYNC_RESULT " +
-                    "uploaded=\(summary.uploadedCount) " +
-                    "downloaded=\(summary.downloadedCount) " +
-                    "failed=\(summary.failedCount) " +
-                    "bytes=\(summary.transferredBytes)"
-                )
-#endif
             } catch {
+                SyncEngineStatusStore.shared.finish(entries: entries, confirmed: false)
 #if DEBUG
-                print("DAYMARK_THUMBNAIL_SYNC_ERROR \(error.localizedDescription)")
+                print("DAYMARK_SYNC_ENGINE_ERROR \(error.localizedDescription)")
 #endif
             }
 #if DEBUG
@@ -69,9 +63,23 @@ struct ContentView: View {
         }
     }
 
-    private var thumbnailSyncKey: String {
+    private var assetSyncKey: String {
         entries
-            .map { "\($0.id):\($0.thumbnailContentHash ?? "")" }
+            .map {
+                [
+                    $0.id,
+                    $0.originalContentHash ?? "",
+                    $0.day.timeIntervalSince1970.description,
+                    $0.captureDate?.timeIntervalSince1970.description ?? "",
+                    $0.latitude?.description ?? "",
+                    $0.longitude?.description ?? "",
+                    $0.timezone ?? "",
+                    $0.countryCode ?? "",
+                    $0.countryName ?? "",
+                    $0.city ?? "",
+                    $0.caption ?? "",
+                ].joined(separator: ":")
+            }
             .sorted()
             .joined(separator: "|")
     }

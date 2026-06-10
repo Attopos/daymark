@@ -8,6 +8,7 @@ struct PhotoDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     @Environment(LocationLocalizer.self) private var locationLocalizer
+    @Query private var allEntries: [PhotoEntry]
 
     let entry: PhotoEntry
     private let photoStore = PhotoStore()
@@ -17,6 +18,7 @@ struct PhotoDetailView: View {
     @State private var showingLocationPicker = false
     @State private var pendingReplacementImport: PendingPhotoReplacement?
     @State private var errorMessage: String?
+    @State private var isDownloadingViewPhoto = false
 
     var body: some View {
         ScrollView {
@@ -78,6 +80,9 @@ struct PhotoDetailView: View {
         .task {
             await locationLocalizer.localize(entry)
         }
+        .task(id: entry.localViewPhotoFilename) {
+            await downloadViewPhotoIfNeeded()
+        }
         .sheet(isPresented: $showingPhotoEditor) {
             if let image = photoStore.image(for: entry) {
                 PhotoEditView(image: image) { editedImage in
@@ -96,6 +101,8 @@ struct PhotoDetailView: View {
                 entry.city = city
                 entry.countryCode = countryCode
                 entry.countryName = countryName
+                entry.metadataSyncState = .localOnly
+                try? modelContext.save()
                 Task {
                     await locationLocalizer.localize(entry)
                 }
@@ -120,22 +127,84 @@ struct PhotoDetailView: View {
     }
 
     private var photoSection: some View {
-        Group {
-            if let image = photoStore.image(for: entry) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            } else {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
-                    .aspectRatio(1, contentMode: .fit)
-                    .overlay {
-                        Image(systemName: "photo")
-                            .font(.system(size: 40, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
+        VStack(alignment: .leading, spacing: 8) {
+            Group {
+                if let image = photoStore.viewImage(for: entry) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                } else {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                        .aspectRatio(1, contentMode: .fit)
+                        .overlay {
+                            if isDownloadingViewPhoto {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "photo")
+                                    .font(.system(size: 40, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                }
             }
+
+            if viewPhotoStatusVisible {
+                HStack(spacing: 6) {
+                    if isDownloadingViewPhoto || entry.viewPhotoSyncState == .downloading {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(viewPhotoStatusText)
+                        .font(.caption)
+                        .foregroundStyle(entry.viewPhotoSyncState == .failed ? .red : .secondary)
+                }
+            }
+        }
+    }
+
+    private var viewPhotoStatusVisible: Bool {
+        isDownloadingViewPhoto ||
+        [.pendingDownload, .downloading, .failed].contains(entry.viewPhotoSyncState)
+    }
+
+    private var viewPhotoStatusText: String {
+        let size = entry.viewPhotoByteCount.map {
+            ByteCountFormatter.string(fromByteCount: $0, countStyle: .file)
+        }
+
+        switch entry.viewPhotoSyncState {
+        case .pendingDownload:
+            return ["Waiting to download", size].compactMap { $0 }.joined(separator: " · ")
+        case .downloading:
+            return ["Downloading", size].compactMap { $0 }.joined(separator: " · ")
+        case .failed:
+            return entry.lastSyncErrorMessage ?? "Download failed"
+        default:
+            return size.map { "Downloading · \($0)" } ?? "Downloading"
+        }
+    }
+
+    @MainActor
+    private func downloadViewPhotoIfNeeded() async {
+        guard photoStore.viewPhotoData(for: entry) == nil,
+              photoStore.originalData(for: entry) == nil,
+              !isDownloadingViewPhoto else {
+            return
+        }
+
+        isDownloadingViewPhoto = true
+        defer { isDownloadingViewPhoto = false }
+        do {
+            let downloadedBytes = try await ViewPhotoSyncCoordinator().downloadOnDemand(
+                entry: entry,
+                in: modelContext
+            )
+            SyncEngineStatusStore.shared.addTransferred(downloaded: downloadedBytes)
+            SyncEngineStatusStore.shared.refresh(entries: allEntries)
+        } catch {
+            // The thumbnail remains visible while iCloud is unavailable.
         }
     }
 

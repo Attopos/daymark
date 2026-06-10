@@ -13,7 +13,9 @@ struct DaymarkApp: App {
         let config = ModelConfiguration(
             schema: schema,
             isStoredInMemoryOnly: false,
-            cloudKitDatabase: .private("iCloud.com.shizhengcao.Daymark")
+            cloudKitDatabase: LegacySyncMigration.usesSwiftDataMirroring
+                ? .private("iCloud.com.shizhengcao.Daymark")
+                : .none
         )
 
         do {

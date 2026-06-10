@@ -48,6 +48,8 @@ struct ThumbnailPhotoSyncSummary {
     var skippedCount = 0
     var failedCount = 0
     var transferredBytes: Int64 = 0
+    var uploadedBytes: Int64 = 0
+    var downloadedBytes: Int64 = 0
 }
 
 @MainActor
@@ -162,6 +164,7 @@ struct ThumbnailPhotoSyncCoordinator {
                 markSynced(candidate.entry)
                 summary.uploadedCount += 1
                 summary.transferredBytes += candidate.request.byteCount
+                summary.uploadedBytes += candidate.request.byteCount
             }
         } catch {
             for candidate in candidates {
@@ -200,6 +203,7 @@ struct ThumbnailPhotoSyncCoordinator {
                 markSynced(candidate.entry)
                 summary.downloadedCount += 1
                 summary.transferredBytes += Int64(data.count)
+                summary.downloadedBytes += Int64(data.count)
             }
         } catch {
             for candidate in candidates {
@@ -403,7 +407,7 @@ enum ThumbnailPhotoSyncError: LocalizedError {
     }
 }
 
-private extension Array {
+extension Array {
     func chunked(maximumCount: Int) -> [ArraySlice<Element>] {
         guard maximumCount > 0 else { return [] }
         return stride(from: 0, to: count, by: maximumCount).map {
