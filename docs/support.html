@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Daymark Support</title>
+  <style>
+    :root {
+      color: #1d1d1f;
+      background: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+        Helvetica, Arial, sans-serif;
+      font-synthesis: none;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      background: #ffffff;
+      color: #1d1d1f;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .page {
+      width: min(100% - 40px, 700px);
+      min-height: 100vh;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    main {
+      flex: 1;
+      padding: 96px 0 72px;
+    }
+
+    h1 {
+      margin: 0 0 28px;
+      font-size: 40px;
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 20px;
+      font-size: 18px;
+      line-height: 1.65;
+    }
+
+    .secondary {
+      color: #6e6e73;
+    }
+
+    a {
+      color: #0066cc;
+      text-decoration: none;
+      overflow-wrap: anywhere;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    a:focus-visible {
+      border-radius: 3px;
+      outline: 3px solid rgba(0, 102, 204, 0.3);
+      outline-offset: 3px;
+    }
+
+    footer {
+      padding: 24px 0 40px;
+      border-top: 1px solid #d2d2d7;
+      color: #6e6e73;
+      font-size: 14px;
+    }
+
+    @media (max-width: 600px) {
+      .page {
+        width: min(100% - 32px, 700px);
+      }
+
+      main {
+        padding: 64px 0 56px;
+      }
+
+      h1 {
+        margin-bottom: 24px;
+        font-size: 34px;
+      }
+
+      p {
+        font-size: 17px;
+        line-height: 1.6;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <main>
+      <h1>Daymark Support</h1>
+      <p>
+        Daymark is a visual journal that helps users anchor daily life through
+        photos, time, and place.
+      </p>
+      <p>
+        For support, feedback, bug reports, or feature requests:
+      </p>
+      <p>
+        Email:
+        <a href="mailto:shizhengcao74519@gmail.com">shizhengcao74519@gmail.com</a>
+      </p>
+      <p class="secondary">Response time: usually within 48 hours.</p>
+    </main>
+    <footer>&copy; Daymark</footer>
+  </div>
+</body>
+</html>
