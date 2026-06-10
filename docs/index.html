@@ -83,11 +83,15 @@
 
     .hero {
       min-height: calc(100vh - 64px);
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(320px, 430px);
-      gap: 72px;
+      display: flex;
       align-items: center;
+      justify-content: center;
       padding: 72px 0 88px;
+    }
+
+    .hero-content {
+      max-width: 760px;
+      text-align: center;
     }
 
     .eyebrow {
@@ -115,7 +119,7 @@
 
     .hero-copy {
       max-width: 590px;
-      margin: 24px 0 0;
+      margin: 24px auto 0;
       color: #515154;
       font-size: 19px;
       line-height: 1.6;
@@ -135,57 +139,6 @@
     .hero-link::after {
       content: "\2192";
       margin-left: 8px;
-    }
-
-    .journal-preview {
-      position: relative;
-      width: 100%;
-      aspect-ratio: 0.82;
-      overflow: hidden;
-      border: 1px solid rgba(0, 0, 0, 0.08);
-      border-radius: 28px;
-      background: #f5f5f7;
-      box-shadow: 0 28px 60px rgba(0, 0, 0, 0.13);
-    }
-
-    .preview-photo {
-      height: 62%;
-      background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, 0.14)),
-        linear-gradient(150deg, #a9cad1 0 34%, #e8d9be 34% 56%, #7e9d78 56% 100%);
-    }
-
-    .preview-date {
-      position: absolute;
-      top: 24px;
-      left: 24px;
-      padding: 7px 10px;
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.9);
-      color: #1d1d1f;
-      font-size: 13px;
-      font-weight: 650;
-      backdrop-filter: blur(12px);
-    }
-
-    .preview-content {
-      padding: 28px;
-    }
-
-    .preview-content p {
-      margin: 0;
-    }
-
-    .preview-title {
-      font-size: 25px;
-      font-weight: 650;
-      line-height: 1.2;
-    }
-
-    .preview-location {
-      margin-top: 10px !important;
-      color: #6e6e73;
-      font-size: 15px;
     }
 
     section {
@@ -298,23 +251,7 @@
 
     @media (max-width: 820px) {
       .hero {
-        grid-template-columns: 1fr;
-        gap: 52px;
         padding-top: 64px;
-      }
-
-      .hero-content {
-        text-align: center;
-      }
-
-      .hero-copy {
-        margin-right: auto;
-        margin-left: auto;
-      }
-
-      .journal-preview {
-        width: min(100%, 390px);
-        margin: 0 auto;
       }
 
       .feature-grid {
@@ -434,14 +371,6 @@
         <a class="hero-link" href="#features">Explore Daymark</a>
       </div>
 
-      <div class="journal-preview" aria-label="A Daymark journal entry preview">
-        <div class="preview-photo"></div>
-        <span class="preview-date">JUNE 10</span>
-        <div class="preview-content">
-          <p class="preview-title">A quiet afternoon</p>
-          <p class="preview-location">West Lake, Hangzhou</p>
-        </div>
-      </div>
     </div>
 
     <section class="features" id="features">
@@ -492,7 +421,7 @@
             and we will be happy to help.
           </p>
         </div>
-        <a class="email-link" href="mailto:support@daymark.app">support@daymark.app</a>
+        <a class="email-link" href="mailto:shizhengcao74519@gmail.com">shizhengcao74519@gmail.com</a>
       </div>
     </section>
   </main>
