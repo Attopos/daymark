@@ -15,7 +15,23 @@ enum BackupImportMode {
 
 struct BackupContents {
     let payload: DaymarkBackupPayload
-    let imageFiles: [String: Data]
+    fileprivate let archiveData: Data?
+    fileprivate let imageRanges: [String: Range<Int>]
+
+    init(
+        payload: DaymarkBackupPayload,
+        archiveData: Data? = nil,
+        imageRanges: [String: Range<Int>] = [:]
+    ) {
+        self.payload = payload
+        self.archiveData = archiveData
+        self.imageRanges = imageRanges
+    }
+
+    func imageData(named filename: String) -> Data? {
+        guard let archiveData, let range = imageRanges[filename] else { return nil }
+        return archiveData.subdata(in: range)
+    }
 }
 
 enum BackupError: LocalizedError {
@@ -463,10 +479,10 @@ struct PhotoStore {
             }
         }
 
-        let data = try Data(contentsOf: url)
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
 
         if data.count >= 2 && data[data.startIndex] == 0x50 && data[data.startIndex + 1] == 0x4B {
-            let zipEntries = try ZipArchive.read(from: data)
+            let zipEntries = try ZipArchive.index(from: data)
 
             guard let jsonEntry = zipEntries.first(where: { $0.path == "entries.json" }) else {
                 throw BackupError.missingEntriesJSON
@@ -474,19 +490,23 @@ struct PhotoStore {
 
             let payload: DaymarkBackupPayload
             do {
-                payload = try decodedBackupPayload(from: jsonEntry.data)
+                payload = try decodedBackupPayload(from: data.subdata(in: jsonEntry.dataRange))
             } catch {
                 throw BackupError.invalidEntriesJSON
             }
 
-            var imageFiles: [String: Data] = [:]
+            var imageRanges: [String: Range<Int>] = [:]
             for entry in zipEntries where entry.path.hasPrefix("images/") {
                 let filename = String(entry.path.dropFirst("images/".count))
                 guard !filename.isEmpty else { continue }
-                imageFiles[filename] = entry.data
+                imageRanges[filename] = entry.dataRange
             }
 
-            return BackupContents(payload: payload, imageFiles: imageFiles)
+            return BackupContents(
+                payload: payload,
+                archiveData: data,
+                imageRanges: imageRanges
+            )
         }
 
         let payload: DaymarkBackupPayload
@@ -495,14 +515,18 @@ struct PhotoStore {
         } catch {
             throw BackupError.invalidEntriesJSON
         }
-        return BackupContents(payload: payload, imageFiles: [:])
+        return BackupContents(payload: payload)
     }
 
-    func importBackup(from contents: BackupContents, mode: BackupImportMode, into modelContext: ModelContext) throws {
+    func importBackup(
+        from contents: BackupContents,
+        mode: BackupImportMode,
+        into modelContext: ModelContext
+    ) async throws {
         var replacedOriginalFilenames: [String] = []
 
         do {
-            for backupEntry in contents.payload.entries {
+            for (index, backupEntry) in contents.payload.entries.enumerated() {
                 let normalizedDate = normalizedDay(for: backupEntry.day)
                 let existing = try existingEntry(for: normalizedDate, in: modelContext)
 
@@ -531,34 +555,37 @@ struct PhotoStore {
                 entry.metadataSyncState = .localOnly
 
                 if let filename = backupEntry.imageFilename,
-                   let imageData = contents.imageFiles[filename] {
-                    let storedOriginal = try originalFileStore.write(imageData, ownerID: entry.id)
-                    let generatedThumbnailData = try thumbnailData(from: imageData)
-                    let storedThumbnail = try thumbnailFileStore.write(generatedThumbnailData, ownerID: entry.id)
-                    let generatedViewPhotoData = try viewPhotoData(from: imageData)
-                    let storedViewPhoto = try viewPhotoFileStore.write(generatedViewPhotoData, ownerID: entry.id)
+                   let imageData = contents.imageData(named: filename) {
+                    let storedPhotos = try autoreleasepool {
+                        let original = try originalFileStore.write(imageData, ownerID: entry.id)
+                        let generatedThumbnail = try thumbnailData(from: imageData)
+                        let thumbnail = try thumbnailFileStore.write(generatedThumbnail, ownerID: entry.id)
+                        let generatedViewPhoto = try viewPhotoData(from: imageData)
+                        let viewPhoto = try viewPhotoFileStore.write(generatedViewPhoto, ownerID: entry.id)
+                        return (original, thumbnail, viewPhoto)
+                    }
                     trackReplacement(
                         oldFilename: entry.localOriginalFilename,
-                        newFilename: storedOriginal.filename,
+                        newFilename: storedPhotos.0.filename,
                         replaced: &replacedOriginalFilenames
                     )
                     entry.imageData = nil
                     try? thumbnailFileStore.remove(filename: entry.localThumbnailFilename)
                     entry.thumbnailData = nil
-                    entry.localThumbnailFilename = storedThumbnail.filename
-                    entry.thumbnailByteCount = storedThumbnail.byteCount
-                    entry.thumbnailContentHash = storedThumbnail.contentHash
+                    entry.localThumbnailFilename = storedPhotos.1.filename
+                    entry.thumbnailByteCount = storedPhotos.1.byteCount
+                    entry.thumbnailContentHash = storedPhotos.1.contentHash
                     entry.thumbnailModifiedAt = .now
                     entry.thumbnailSyncState = .localOnly
                     try? viewPhotoFileStore.remove(filename: entry.localViewPhotoFilename)
-                    entry.localViewPhotoFilename = storedViewPhoto.filename
-                    entry.viewPhotoByteCount = storedViewPhoto.byteCount
-                    entry.viewPhotoContentHash = storedViewPhoto.contentHash
+                    entry.localViewPhotoFilename = storedPhotos.2.filename
+                    entry.viewPhotoByteCount = storedPhotos.2.byteCount
+                    entry.viewPhotoContentHash = storedPhotos.2.contentHash
                     entry.viewPhotoModifiedAt = .now
                     entry.viewPhotoSyncState = .localOnly
-                    entry.localOriginalFilename = storedOriginal.filename
-                    entry.originalByteCount = storedOriginal.byteCount
-                    entry.originalContentHash = storedOriginal.contentHash
+                    entry.localOriginalFilename = storedPhotos.0.filename
+                    entry.originalByteCount = storedPhotos.0.byteCount
+                    entry.originalContentHash = storedPhotos.0.contentHash
                     entry.originalSyncState = .localOnly
                 } else if let legacyImageData = backupEntry.legacyImageData {
                     let storedOriginal = try originalFileStore.write(legacyImageData, ownerID: entry.id)
@@ -595,6 +622,11 @@ struct PhotoStore {
                 }
 
                 invalidateCaches(for: entry)
+
+                if (index + 1).isMultiple(of: 5) {
+                    try modelContext.save()
+                }
+                await Task.yield()
             }
 
             try modelContext.save()
@@ -1330,6 +1362,11 @@ enum ZipArchive {
         let data: Data
     }
 
+    struct IndexedEntry {
+        let path: String
+        let dataRange: Range<Int>
+    }
+
     static func create(entries: [Entry]) -> Data {
         var archive = Data()
         var centralDirectory = Data()
@@ -1392,7 +1429,7 @@ enum ZipArchive {
         return archive
     }
 
-    static func read(from data: Data) throws -> [Entry] {
+    static func index(from data: Data) throws -> [IndexedEntry] {
         guard data.count >= 22 else { throw BackupError.invalidArchive }
 
         var eocdOffset = data.count - 22
@@ -1405,7 +1442,7 @@ enum ZipArchive {
         let entryCount = Int(data.readZipUInt16(at: eocdOffset + 10))
         let centralDirOffset = Int(data.readZipUInt32(at: eocdOffset + 16))
 
-        var entries: [Entry] = []
+        var entries: [IndexedEntry] = []
         var offset = centralDirOffset
 
         for _ in 0..<entryCount {
@@ -1430,11 +1467,22 @@ enum ZipArchive {
             let dataStart = localOffset + 30 + localNameLength + localExtraLength
             guard dataStart + compressedSize <= data.count else { throw BackupError.invalidArchive }
 
-            entries.append(Entry(path: name, data: Data(data[dataStart..<dataStart + compressedSize])))
+            entries.append(
+                IndexedEntry(
+                    path: name,
+                    dataRange: dataStart..<(dataStart + compressedSize)
+                )
+            )
             offset = nameStart + nameLength + extraLength + commentLength
         }
 
         return entries
+    }
+
+    static func read(from data: Data) throws -> [Entry] {
+        try index(from: data).map {
+            Entry(path: $0.path, data: data.subdata(in: $0.dataRange))
+        }
     }
 
     private static let crc32Table: [UInt32] = (0..<256).map { i in

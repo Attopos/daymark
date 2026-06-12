@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var showingImportOptions = false
     @State private var exportItem: DaymarkBackupExportItem?
     @State private var pendingBackup: BackupContents?
+    @State private var isImporting = false
     @State private var statusMessage: String?
     @State private var errorMessage: String?
 
@@ -176,6 +177,12 @@ struct SettingsView: View {
                     showingImporter = true
                 }
                 .buttonStyle(.bordered)
+                .disabled(isImporting)
+            }
+
+            if isImporting {
+                ProgressView("Importing backup…")
+                    .font(.footnote)
             }
 
             if let statusMessage {
@@ -223,13 +230,23 @@ struct SettingsView: View {
 
     private func performImport(mode: BackupImportMode) {
         guard let backup = pendingBackup else { return }
-        do {
-            try photoStore.importBackup(from: backup, mode: mode, into: modelContext)
-            statusMessage = "Imported \(backup.payload.entries.count) entries."
-        } catch {
-            errorMessage = error.localizedDescription
-        }
         pendingBackup = nil
+        isImporting = true
+        statusMessage = nil
+
+        Task {
+            do {
+                try await photoStore.importBackup(
+                    from: backup,
+                    mode: mode,
+                    into: modelContext
+                )
+                statusMessage = "Imported \(backup.payload.entries.count) entries."
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isImporting = false
+        }
     }
 }
 

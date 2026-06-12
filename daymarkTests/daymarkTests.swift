@@ -191,6 +191,98 @@ final class daymarkTests: XCTestCase {
         ))
     }
 
+    func testBackupParserIndexesImagesWithoutEagerCopies() throws {
+        let imageData = try makeJPEGData()
+        let payload = DaymarkBackupPayload(
+            version: 2,
+            exportedAt: Date(timeIntervalSince1970: 100),
+            entries: [
+                DaymarkBackupEntry(
+                    id: "backup-entry",
+                    day: Date(timeIntervalSince1970: 200),
+                    captureDate: nil,
+                    imageFilename: "backup-entry.jpg",
+                    latitude: nil,
+                    longitude: nil,
+                    timezone: nil,
+                    countryCode: nil,
+                    countryName: nil,
+                    city: nil,
+                    caption: "Imported"
+                )
+            ]
+        )
+        let jsonData = try JSONEncoder().encode(payload)
+        let archive = ZipArchive.create(entries: [
+            .init(path: "entries.json", data: jsonData),
+            .init(path: "images/backup-entry.jpg", data: imageData),
+        ])
+        let archiveURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString).zip")
+        try archive.write(to: archiveURL)
+        defer { try? FileManager.default.removeItem(at: archiveURL) }
+
+        let contents = try PhotoStore().parseBackup(from: archiveURL)
+
+        XCTAssertEqual(contents.payload.entries.count, 1)
+        XCTAssertEqual(contents.imageData(named: "backup-entry.jpg"), imageData)
+        XCTAssertNil(contents.imageData(named: "missing.jpg"))
+    }
+
+    func testBackupImportRestoresIndexedPhotoAssets() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let store = PhotoStore(
+            originalsDirectoryURL: rootURL.appendingPathComponent("originals"),
+            thumbnailsDirectoryURL: rootURL.appendingPathComponent("thumbnails"),
+            viewPhotosDirectoryURL: rootURL.appendingPathComponent("views"),
+            conflictPhotosDirectoryURL: rootURL.appendingPathComponent("conflicts")
+        )
+        let imageData = try makeJPEGData()
+        let day = Date(timeIntervalSince1970: 300)
+        let payload = DaymarkBackupPayload(
+            version: 2,
+            exportedAt: Date(timeIntervalSince1970: 100),
+            entries: [
+                DaymarkBackupEntry(
+                    id: "backup-entry",
+                    day: day,
+                    captureDate: nil,
+                    imageFilename: "backup-entry.jpg",
+                    latitude: nil,
+                    longitude: nil,
+                    timezone: "Asia/Shanghai",
+                    countryCode: "CN",
+                    countryName: "China",
+                    city: "Shanghai",
+                    caption: "Imported"
+                )
+            ]
+        )
+        let archive = ZipArchive.create(entries: [
+            .init(path: "entries.json", data: try JSONEncoder().encode(payload)),
+            .init(path: "images/backup-entry.jpg", data: imageData),
+        ])
+        let archiveURL = rootURL.appendingPathComponent("backup.zip")
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try archive.write(to: archiveURL)
+        let contents = try store.parseBackup(from: archiveURL)
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+
+        try await store.importBackup(from: contents, mode: .overwrite, into: context)
+
+        let entries = try context.fetch(FetchDescriptor<PhotoEntry>())
+        let imported = try XCTUnwrap(entries.first)
+        XCTAssertEqual(imported.id, "backup-entry")
+        XCTAssertEqual(imported.caption, "Imported")
+        XCTAssertEqual(imported.originalSyncState, .localOnly)
+        XCTAssertEqual(store.originalData(for: imported), imageData)
+        XCTAssertNotNil(store.thumbnailData(for: imported))
+        XCTAssertNotNil(store.viewPhotoData(for: imported))
+    }
+
     func testEmbeddedThumbnailMigrationMovesDataOutsideSwiftData() throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
