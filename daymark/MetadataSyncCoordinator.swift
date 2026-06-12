@@ -101,11 +101,15 @@ struct MetadataSyncCoordinator {
         in modelContext: ModelContext
     ) async throws -> MetadataSyncSummary {
         var summary = MetadataSyncSummary()
-        var localByID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
+        var localByID: [String: PhotoEntry] = [:]
+        for entry in entries where localByID[entry.id] == nil {
+            localByID[entry.id] = entry
+        }
+        let uniqueEntries = Array(localByID.values)
         let remoteByID = try await remoteStore.inventory()
         var uploads: [RemoteMetadataRecord] = []
 
-        for entry in entries {
+        for entry in uniqueEntries {
             let remote = remoteByID[entry.id]
             let local = captureLocalChanges(
                 for: entry,

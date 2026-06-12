@@ -120,6 +120,26 @@ final class daymarkTests: XCTestCase {
         XCTAssertEqual(persistedEntry.overallSyncState, .pendingDownload)
     }
 
+    func testMetadataSyncToleratesDuplicateLocalIDs() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let first = PhotoEntry(id: "duplicate-id", day: Date(timeIntervalSince1970: 1_000))
+        let second = PhotoEntry(id: "duplicate-id", day: Date(timeIntervalSince1970: 2_000))
+        context.insert(first)
+        context.insert(second)
+        try context.save()
+        let remoteStore = RecordingMetadataRemoteStore()
+
+        let summary = try await MetadataSyncCoordinator(
+            remoteStore: remoteStore,
+            deviceID: "test-device"
+        ).sync(entries: [first, second], in: context)
+
+        XCTAssertEqual(summary.uploadedCount, 1)
+        XCTAssertEqual(remoteStore.uploadedRecords.map(\.entryID), ["duplicate-id"])
+        XCTAssertEqual(try context.fetch(FetchDescriptor<PhotoEntry>()).count, 2)
+    }
+
     func testPhotoStoreKeepsOriginalOutsideSwiftDataAndRemovesItOnDelete() async throws {
         let directoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
