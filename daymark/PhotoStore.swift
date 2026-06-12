@@ -659,6 +659,106 @@ struct PhotoStore {
         }
     }
 
+    @discardableResult
+    func consolidateDuplicateDays(
+        for entries: [PhotoEntry],
+        in modelContext: ModelContext
+    ) throws -> Int {
+        let groups = Dictionary(grouping: entries) { normalizedDay(for: $0.day) }
+        var removedCount = 0
+
+        for (day, duplicates) in groups where duplicates.count > 1 {
+            let ordered = duplicates.sorted {
+                duplicateRetentionScore(for: $0) > duplicateRetentionScore(for: $1)
+            }
+            guard let keeper = ordered.first else { continue }
+
+            keeper.day = day
+            for duplicate in ordered.dropFirst() {
+                mergeMissingValues(from: duplicate, into: keeper)
+                modelContext.delete(duplicate)
+                removedCount += 1
+            }
+            keeper.metadataSyncState = .localOnly
+        }
+
+        if removedCount > 0 {
+            try modelContext.save()
+        }
+        return removedCount
+    }
+
+    private func duplicateRetentionScore(for entry: PhotoEntry) -> Int {
+        var score = 0
+        if entry.localOriginalFilename != nil { score += 1_000 }
+        if entry.originalContentHash != nil { score += 100 }
+        if entry.localViewPhotoFilename != nil { score += 50 }
+        if entry.localThumbnailFilename != nil { score += 20 }
+        if entry.imageData != nil { score += 10 }
+        if entry.thumbnailData != nil { score += 5 }
+        if entry.captureDate != nil { score += 1 }
+        if entry.latitude != nil { score += 1 }
+        if entry.longitude != nil { score += 1 }
+        if entry.timezone != nil { score += 1 }
+        if entry.countryCode != nil { score += 1 }
+        if entry.countryName != nil { score += 1 }
+        if entry.city != nil { score += 1 }
+        if entry.caption != nil { score += 1 }
+        return score
+    }
+
+    private func mergeMissingValues(from source: PhotoEntry, into destination: PhotoEntry) {
+        destination.imageData = destination.imageData ?? source.imageData
+        destination.thumbnailData = destination.thumbnailData ?? source.thumbnailData
+        destination.captureDate = destination.captureDate ?? source.captureDate
+        destination.imageFilename = destination.imageFilename ?? source.imageFilename
+        destination.localOriginalFilename =
+            destination.localOriginalFilename ?? source.localOriginalFilename
+        destination.localThumbnailFilename =
+            destination.localThumbnailFilename ?? source.localThumbnailFilename
+        destination.localViewPhotoFilename =
+            destination.localViewPhotoFilename ?? source.localViewPhotoFilename
+        destination.originalByteCount =
+            destination.originalByteCount ?? source.originalByteCount
+        destination.originalContentHash =
+            destination.originalContentHash ?? source.originalContentHash
+        destination.originalLastSyncedHash =
+            destination.originalLastSyncedHash ?? source.originalLastSyncedHash
+        destination.thumbnailByteCount =
+            destination.thumbnailByteCount ?? source.thumbnailByteCount
+        destination.thumbnailContentHash =
+            destination.thumbnailContentHash ?? source.thumbnailContentHash
+        destination.thumbnailModifiedAt =
+            destination.thumbnailModifiedAt ?? source.thumbnailModifiedAt
+        destination.viewPhotoByteCount =
+            destination.viewPhotoByteCount ?? source.viewPhotoByteCount
+        destination.viewPhotoContentHash =
+            destination.viewPhotoContentHash ?? source.viewPhotoContentHash
+        destination.viewPhotoModifiedAt =
+            destination.viewPhotoModifiedAt ?? source.viewPhotoModifiedAt
+        destination.latitude = destination.latitude ?? source.latitude
+        destination.longitude = destination.longitude ?? source.longitude
+        destination.timezone = destination.timezone ?? source.timezone
+        destination.countryCode = destination.countryCode ?? source.countryCode
+        destination.countryName = destination.countryName ?? source.countryName
+        destination.city = destination.city ?? source.city
+        destination.caption = destination.caption ?? source.caption
+        destination.metadataVersionData =
+            destination.metadataVersionData ?? source.metadataVersionData
+        destination.metadataBaselineData =
+            destination.metadataBaselineData ?? source.metadataBaselineData
+
+        if destination.thumbnailSyncState == .untracked {
+            destination.thumbnailSyncState = source.thumbnailSyncState
+        }
+        if destination.viewPhotoSyncState == .untracked {
+            destination.viewPhotoSyncState = source.viewPhotoSyncState
+        }
+        if destination.originalSyncState == .untracked {
+            destination.originalSyncState = source.originalSyncState
+        }
+    }
+
     func migrateEmbeddedThumbnails(
         for entries: [PhotoEntry],
         in modelContext: ModelContext

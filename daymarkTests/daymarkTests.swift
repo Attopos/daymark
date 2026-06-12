@@ -140,6 +140,45 @@ final class daymarkTests: XCTestCase {
         XCTAssertEqual(try context.fetch(FetchDescriptor<PhotoEntry>()).count, 2)
     }
 
+    func testDuplicateDayConsolidationKeepsMostCompleteEntry() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let day = Date(timeIntervalSince1970: 10_000)
+        let metadataOnly = PhotoEntry(id: "metadata", day: day, city: "Shanghai")
+        let thumbnail = PhotoEntry(
+            id: "thumbnail",
+            day: day,
+            localThumbnailFilename: "photo.thumb",
+            thumbnailSyncState: .synced
+        )
+        let viewing = PhotoEntry(
+            id: "viewing",
+            day: day,
+            localThumbnailFilename: "photo.thumb",
+            localViewPhotoFilename: "photo.view",
+            viewPhotoSyncState: .synced
+        )
+        context.insert(metadataOnly)
+        context.insert(thumbnail)
+        context.insert(viewing)
+        try context.save()
+
+        let removed = try PhotoStore().consolidateDuplicateDays(
+            for: [metadataOnly, thumbnail, viewing],
+            in: context
+        )
+
+        let entries = try context.fetch(FetchDescriptor<PhotoEntry>())
+        let kept = try XCTUnwrap(entries.first)
+        XCTAssertEqual(removed, 2)
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(kept.id, "viewing")
+        XCTAssertEqual(kept.city, "Shanghai")
+        XCTAssertEqual(kept.localThumbnailFilename, "photo.thumb")
+        XCTAssertEqual(kept.localViewPhotoFilename, "photo.view")
+        XCTAssertEqual(kept.metadataSyncState, .localOnly)
+    }
+
     func testPhotoStoreKeepsOriginalOutsideSwiftDataAndRemovesItOnDelete() async throws {
         let directoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1220,6 +1259,7 @@ private final class RecordingThumbnailRemoteStore: ThumbnailPhotoRemoteStore {
 @MainActor
 private final class RecordingMetadataRemoteStore: MetadataRemoteStore {
     private(set) var uploadedRecords: [RemoteMetadataRecord] = []
+    private(set) var deletedEntryIDs: [String] = []
     private let remoteInventory: [String: RemoteMetadataRecord]
 
     init(inventory: [String: RemoteMetadataRecord] = [:]) {
@@ -1232,6 +1272,10 @@ private final class RecordingMetadataRemoteStore: MetadataRemoteStore {
 
     func upload(_ records: [RemoteMetadataRecord]) async throws {
         uploadedRecords.append(contentsOf: records)
+    }
+
+    func delete(entryIDs: [String]) async throws {
+        deletedEntryIDs.append(contentsOf: entryIDs)
     }
 }
 

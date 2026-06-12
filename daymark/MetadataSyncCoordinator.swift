@@ -68,6 +68,7 @@ struct RemoteMetadataRecord: Equatable {
 protocol MetadataRemoteStore {
     func inventory() async throws -> [String: RemoteMetadataRecord]
     func upload(_ records: [RemoteMetadataRecord]) async throws
+    func delete(entryIDs: [String]) async throws
 }
 
 struct MetadataSyncSummary {
@@ -106,7 +107,25 @@ struct MetadataSyncCoordinator {
             localByID[entry.id] = entry
         }
         let uniqueEntries = Array(localByID.values)
-        let remoteByID = try await remoteStore.inventory()
+        var remoteByID = try await remoteStore.inventory()
+        var localByDay: [Date: PhotoEntry] = [:]
+        for entry in uniqueEntries {
+            let day = Calendar.current.startOfDay(for: entry.day)
+            if localByDay[day] == nil {
+                localByDay[day] = entry
+            }
+        }
+        let staleRemoteIDs = remoteByID.values.compactMap { remote -> String? in
+            let day = Calendar.current.startOfDay(for: remote.metadata.snapshot.day)
+            guard let local = localByDay[day], local.id != remote.entryID else { return nil }
+            return remote.entryID
+        }
+        if !staleRemoteIDs.isEmpty {
+            try await remoteStore.delete(entryIDs: staleRemoteIDs)
+            for entryID in staleRemoteIDs {
+                remoteByID.removeValue(forKey: entryID)
+            }
+        }
         var uploads: [RemoteMetadataRecord] = []
 
         for entry in uniqueEntries {
@@ -349,6 +368,30 @@ struct CloudKitMetadataStore: MetadataRemoteStore {
             try await withCheckedThrowingContinuation { continuation in
                 let operation = CKModifyRecordsOperation(recordsToSave: cloudRecords)
                 operation.savePolicy = .changedKeys
+                operation.isAtomic = true
+                operation.qualityOfService = .utility
+                operation.modifyRecordsResultBlock = { result in
+                    continuation.resume(with: result.map { _ in () })
+                }
+                database.add(operation)
+            }
+        }
+    }
+
+    func delete(entryIDs: [String]) async throws {
+        guard !entryIDs.isEmpty else { return }
+        do {
+            _ = try await database.recordZone(for: zoneID)
+        } catch let error as CKError where error.code == .zoneNotFound {
+            return
+        }
+
+        for chunk in entryIDs.chunked(maximumCount: 200) {
+            let recordIDs = chunk.map {
+                CKRecord.ID(recordName: $0, zoneID: zoneID)
+            }
+            try await withCheckedThrowingContinuation { continuation in
+                let operation = CKModifyRecordsOperation(recordIDsToDelete: recordIDs)
                 operation.isAtomic = true
                 operation.qualityOfService = .utility
                 operation.modifyRecordsResultBlock = { result in

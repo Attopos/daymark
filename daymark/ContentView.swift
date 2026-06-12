@@ -5,6 +5,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @AppStorage("prefersDarkMode") private var prefersDarkMode = false
     @Query private var entries: [PhotoEntry]
+    @State private var isRunningAssetSync = false
     private let photoStore = PhotoStore()
 
     var body: some View {
@@ -27,6 +28,11 @@ struct ContentView: View {
         }
         .preferredColorScheme(prefersDarkMode ? .dark : .light)
         .task(id: assetSyncKey) {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled, !isRunningAssetSync else { return }
+            isRunningAssetSync = true
+            defer { isRunningAssetSync = false }
+
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-runMetadataSyncExperiment") {
                 await MetadataSyncExperiment.run(
@@ -38,11 +44,19 @@ struct ContentView: View {
 #endif
             await photoStore.migrateLegacyLibraryIfNeeded(in: modelContext)
             photoStore.backfillMetadata(for: entries, in: modelContext)
-            photoStore.migrateEmbeddedThumbnails(for: entries, in: modelContext)
-            await photoStore.backfillViewPhotos(for: entries, in: modelContext)
+            do {
+                try photoStore.consolidateDuplicateDays(for: entries, in: modelContext)
+            } catch {
+#if DEBUG
+                print("DAYMARK_DUPLICATE_CONSOLIDATION_ERROR \(error.localizedDescription)")
+#endif
+            }
+            let currentEntries = (try? modelContext.fetch(FetchDescriptor<PhotoEntry>())) ?? entries
+            photoStore.migrateEmbeddedThumbnails(for: currentEntries, in: modelContext)
+            await photoStore.backfillViewPhotos(for: currentEntries, in: modelContext)
             do {
                 try await SyncEngine().sync(
-                    entries: entries,
+                    entries: currentEntries,
                     in: modelContext,
                     includeOriginals: false
                 )
