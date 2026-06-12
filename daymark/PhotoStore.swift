@@ -463,12 +463,16 @@ struct PhotoStore {
         let viewPhotoFilename = entry.localViewPhotoFilename
         let conflictPhotoFilename = entry.originalConflictRemoteFilename
         invalidateCaches(for: entry)
+        PendingSyncDeletionStore.add(entryID: entry.id)
         modelContext.delete(entry)
         try modelContext.save()
         try? originalFileStore.remove(filename: originalFilename)
         try? thumbnailFileStore.remove(filename: thumbnailFilename)
         try? viewPhotoFileStore.remove(filename: viewPhotoFilename)
         try? conflictPhotoFileStore.remove(filename: conflictPhotoFilename)
+        Task.detached(priority: .utility) {
+            await SyncDeletionCoordinator().flush()
+        }
     }
 
     func parseBackup(from url: URL) throws -> BackupContents {
@@ -1551,6 +1555,10 @@ enum ZipArchive {
                 throw BackupError.invalidArchive
             }
 
+            // Only "stored" (method 0) entries are supported; re-zipped archives use deflate.
+            guard data.readZipUInt16(at: offset + 10) == 0 else {
+                throw BackupError.invalidArchive
+            }
             let compressedSize = Int(data.readZipUInt32(at: offset + 20))
             let nameLength = Int(data.readZipUInt16(at: offset + 28))
             let extraLength = Int(data.readZipUInt16(at: offset + 30))

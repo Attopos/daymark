@@ -271,7 +271,7 @@ final class daymarkTests: XCTestCase {
                 )
             ]
         )
-        let jsonData = try JSONEncoder().encode(payload)
+        let jsonData = try makeBackupJSONEncoder().encode(payload)
         let archive = ZipArchive.create(entries: [
             .init(path: "entries.json", data: jsonData),
             .init(path: "images/backup-entry.jpg", data: imageData),
@@ -320,7 +320,7 @@ final class daymarkTests: XCTestCase {
             ]
         )
         let archive = ZipArchive.create(entries: [
-            .init(path: "entries.json", data: try JSONEncoder().encode(payload)),
+            .init(path: "entries.json", data: try makeBackupJSONEncoder().encode(payload)),
             .init(path: "images/backup-entry.jpg", data: imageData),
         ])
         let archiveURL = rootURL.appendingPathComponent("backup.zip")
@@ -1103,6 +1103,13 @@ final class daymarkTests: XCTestCase {
             cloudKitDatabase: .none
         )
         return try ModelContainer(for: schema, configurations: [configuration])
+    }
+
+    // Matches the date strategy PhotoStore uses for entries.json.
+    private func makeBackupJSONEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
     }
 
     private func makeJPEGData() throws -> Data {

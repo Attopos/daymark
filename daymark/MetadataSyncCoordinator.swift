@@ -163,7 +163,10 @@ struct MetadataSyncCoordinator {
             }
         }
 
-        for remote in remoteByID.values where localByID[remote.entryID] == nil {
+        // Entries awaiting remote deletion must not be resurrected from the cloud.
+        let pendingDeletionIDs = PendingSyncDeletionStore.pendingEntryIDs()
+        for remote in remoteByID.values
+        where localByID[remote.entryID] == nil && !pendingDeletionIDs.contains(remote.entryID) {
             let entry = PhotoEntry(id: remote.entryID, day: remote.metadata.snapshot.day)
             remote.metadata.snapshot.apply(to: entry)
             persist(remote.metadata, on: entry)

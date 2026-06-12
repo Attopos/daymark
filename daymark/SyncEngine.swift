@@ -200,8 +200,11 @@ struct SyncEngine {
         includeOriginals: Bool,
         originalLimits: OriginalPhotoSyncLimits = .manual
     ) async throws {
-        statusStore.begin(phase: "Checking Metadata", entries: initialEntries)
+        statusStore.begin(phase: "Removing Deleted Entries", entries: initialEntries)
         statusStore.setICloudAvailable(await cloudAccountAvailable())
+        await SyncDeletionCoordinator().flush()
+
+        statusStore.setPhase("Checking Metadata", entries: initialEntries)
 
         let metadata = try await metadataCoordinator.sync(
             entries: initialEntries,
