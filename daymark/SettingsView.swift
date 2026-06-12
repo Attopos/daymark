@@ -241,8 +241,27 @@ struct SettingsView: View {
                     mode: mode,
                     into: modelContext
                 )
-                statusMessage = "Imported \(backup.payload.entries.count) entries."
             } catch {
+                errorMessage = error.localizedDescription
+                isImporting = false
+                return
+            }
+
+            do {
+                let importedEntries = try modelContext.fetch(FetchDescriptor<PhotoEntry>())
+                try await SyncEngine().sync(
+                    entries: importedEntries,
+                    in: modelContext,
+                    includeOriginals: true,
+                    originalLimits: .unlimited
+                )
+                if SyncEngineStatusStore.shared.snapshot.failures.isEmpty {
+                    statusMessage = "Imported \(backup.payload.entries.count) entries and confirmed with iCloud."
+                } else {
+                    statusMessage = "Imported locally, but iCloud sync finished with failures. Keep the backup and retry Sync Now."
+                }
+            } catch {
+                statusMessage = "Imported locally, but iCloud sync did not finish. Keep the backup and retry Sync Now."
                 errorMessage = error.localizedDescription
             }
             isImporting = false

@@ -30,16 +30,16 @@ extension OriginalPhotoRemoteStore {
     }
 }
 
-struct OriginalPhotoSyncLimits {
+struct OriginalPhotoSyncLimits: Sendable {
     let maximumTransferCount: Int
     let maximumTransferredBytes: Int64
 
-    static let manual = OriginalPhotoSyncLimits(
+    nonisolated static let manual = OriginalPhotoSyncLimits(
         maximumTransferCount: 10,
         maximumTransferredBytes: 100 * 1_024 * 1_024
     )
 
-    static let unlimited = OriginalPhotoSyncLimits(
+    nonisolated static let unlimited = OriginalPhotoSyncLimits(
         maximumTransferCount: .max,
         maximumTransferredBytes: .max
     )

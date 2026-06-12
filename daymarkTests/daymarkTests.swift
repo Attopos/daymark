@@ -763,6 +763,50 @@ final class daymarkTests: XCTestCase {
         XCTAssertEqual(remoteStore.uploadedRecords.first?.metadata.snapshot.caption, "Local edit")
     }
 
+    func testMetadataSyncRestoresRemoteOnlyEntryIntoEmptyLibrary() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let remoteEntry = PhotoEntry(
+            id: "remote-only",
+            day: Date(timeIntervalSince1970: 500),
+            captureDate: Date(timeIntervalSince1970: 450),
+            latitude: 31.2304,
+            longitude: 121.4737,
+            timezone: "Asia/Shanghai",
+            countryCode: "CN",
+            countryName: "China",
+            city: "Shanghai",
+            caption: "Restored"
+        )
+        let metadata = VersionedMetadata(
+            snapshot: MetadataSnapshot(entry: remoteEntry),
+            versions: [:]
+        )
+        let remoteStore = RecordingMetadataRemoteStore(
+            inventory: [
+                remoteEntry.id: RemoteMetadataRecord(
+                    entryID: remoteEntry.id,
+                    metadata: metadata
+                )
+            ]
+        )
+
+        let summary = try await MetadataSyncCoordinator(
+            remoteStore: remoteStore,
+            deviceID: "new-device"
+        ).sync(entries: [], in: context)
+
+        let restoredEntries = try context.fetch(FetchDescriptor<PhotoEntry>())
+        let restored = try XCTUnwrap(restoredEntries.first)
+        XCTAssertEqual(restoredEntries.count, 1)
+        XCTAssertEqual(restored.id, "remote-only")
+        XCTAssertEqual(restored.city, "Shanghai")
+        XCTAssertEqual(restored.caption, "Restored")
+        XCTAssertEqual(restored.metadataSyncState, .synced)
+        XCTAssertEqual(summary.downloadedCount, 1)
+        XCTAssertTrue(remoteStore.uploadedRecords.isEmpty)
+    }
+
     func testSyncStatusSnapshotUsesRealPendingBytes() {
         let upload = PhotoEntry(
             day: .now,

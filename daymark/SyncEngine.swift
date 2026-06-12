@@ -197,7 +197,8 @@ struct SyncEngine {
     func sync(
         entries initialEntries: [PhotoEntry],
         in modelContext: ModelContext,
-        includeOriginals: Bool
+        includeOriginals: Bool,
+        originalLimits: OriginalPhotoSyncLimits = .manual
     ) async throws {
         statusStore.begin(phase: "Checking Metadata", entries: initialEntries)
         statusStore.setICloudAvailable(await cloudAccountAvailable())
@@ -233,7 +234,8 @@ struct SyncEngine {
             statusStore.setPhase("Syncing Originals", entries: entries)
             let originals = try await originalCoordinator.syncOriginals(
                 entries: entries,
-                in: modelContext
+                in: modelContext,
+                limits: originalLimits
             )
             statusStore.addTransferred(
                 uploaded: originals.uploadedBytes,

@@ -141,7 +141,6 @@ struct MetadataSyncCoordinator {
         }
 
         for remote in remoteByID.values where localByID[remote.entryID] == nil {
-            guard !LegacySyncMigration.usesSwiftDataMirroring else { continue }
             let entry = PhotoEntry(id: remote.entryID, day: remote.metadata.snapshot.day)
             remote.metadata.snapshot.apply(to: entry)
             persist(remote.metadata, on: entry)
