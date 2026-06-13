@@ -586,7 +586,7 @@ final class daymarkTests: XCTestCase {
         XCTAssertEqual(fixture.entry.lastSyncErrorMessage, TestUploadError.offline.localizedDescription)
     }
 
-    func testOriginalSyncCoordinatorRejectsMissingLocalFile() async throws {
+    func testOriginalSyncCoordinatorClearsMissingLocalFile() async throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
         let entry = PhotoEntry(
@@ -594,7 +594,19 @@ final class daymarkTests: XCTestCase {
             localOriginalFilename: "missing.image",
             originalByteCount: 100,
             originalContentHash: String(repeating: "a", count: 64),
-            originalSyncState: .localOnly
+            originalLastSyncedHash: String(repeating: "b", count: 64),
+            originalSyncState: .failed
+        )
+        entry.lastSyncErrorComponentRaw = SyncComponent.original.rawValue
+        entry.lastSyncErrorMessage = "The local original photo is missing."
+        entry.recordOriginalConflict(
+            remote: RemoteOriginalPhoto(
+                entryID: entry.id,
+                contentHash: String(repeating: "c", count: 64),
+                byteCount: 200,
+                modifiedAt: .now
+            ),
+            filename: "missing-conflict.image"
         )
         context.insert(entry)
         try context.save()
@@ -608,9 +620,21 @@ final class daymarkTests: XCTestCase {
             )
         ).syncOriginals(entries: [entry], in: context, limits: .unlimited)
 
-        XCTAssertEqual(summary.failedCount, 1)
-        XCTAssertEqual(entry.originalSyncState, .failed)
-        XCTAssertEqual(entry.lastSyncErrorMessage, "The local original photo is missing.")
+        XCTAssertEqual(summary.failedCount, 0)
+        XCTAssertEqual(summary.skippedCount, 1)
+        XCTAssertEqual(entry.originalSyncState, .untracked)
+        XCTAssertNil(entry.localOriginalFilename)
+        XCTAssertNil(entry.originalByteCount)
+        XCTAssertNil(entry.originalContentHash)
+        XCTAssertNil(entry.originalLastSyncedHash)
+        XCTAssertNil(entry.originalConflictRemoteHash)
+        XCTAssertNil(entry.originalConflictRemoteByteCount)
+        XCTAssertNil(entry.originalConflictRemoteModifiedAt)
+        XCTAssertNil(entry.originalConflictRemoteFilename)
+        XCTAssertNil(entry.originalConflictDetectedAt)
+        XCTAssertNil(entry.originalConflictResolutionRaw)
+        XCTAssertNil(entry.lastSyncErrorComponentRaw)
+        XCTAssertNil(entry.lastSyncErrorMessage)
         XCTAssertTrue(remoteStore.uploadRequests.isEmpty)
     }
 

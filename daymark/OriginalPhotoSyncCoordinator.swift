@@ -216,13 +216,11 @@ struct OriginalPhotoSyncCoordinator {
             }
 
             guard let localData else {
-                if entry.localOriginalFilename != nil || entry.originalContentHash != nil {
-                    markFailed(entry, message: OriginalPhotoSyncError.missingLocalOriginal.localizedDescription)
-                    summary.failedCount += 1
+                if hasStaleMissingOriginalMetadata(entry) {
+                    clearMissingOriginal(entry)
                     try? modelContext.save()
-                } else {
-                    summary.skippedCount += 1
                 }
+                summary.skippedCount += 1
                 continue
             }
 
@@ -300,6 +298,40 @@ struct OriginalPhotoSyncCoordinator {
         entry.lastSyncErrorComponentRaw = SyncComponent.original.rawValue
         entry.lastSyncErrorMessage = OriginalPhotoSyncError.contentConflict.localizedDescription
         entry.recordOriginalConflict(remote: remote, filename: filename)
+    }
+
+    private func hasStaleMissingOriginalMetadata(_ entry: PhotoEntry) -> Bool {
+        entry.localOriginalFilename != nil
+            || entry.originalByteCount != nil
+            || entry.originalContentHash != nil
+            || entry.originalLastSyncedHash != nil
+            || entry.originalSyncState != .untracked
+            || entry.lastSyncErrorComponentRaw == SyncComponent.original.rawValue
+            || entry.originalConflictRemoteHash != nil
+            || entry.originalConflictRemoteByteCount != nil
+            || entry.originalConflictRemoteModifiedAt != nil
+            || entry.originalConflictRemoteFilename != nil
+            || entry.originalConflictDetectedAt != nil
+            || entry.originalConflictResolutionRaw != nil
+    }
+
+    private func clearMissingOriginal(_ entry: PhotoEntry) {
+        photoStore.removeConflictOriginal(for: entry)
+        entry.localOriginalFilename = nil
+        entry.originalByteCount = nil
+        entry.originalContentHash = nil
+        entry.originalLastSyncedHash = nil
+        entry.originalConflictRemoteHash = nil
+        entry.originalConflictRemoteByteCount = nil
+        entry.originalConflictRemoteModifiedAt = nil
+        entry.originalConflictDetectedAt = nil
+        entry.originalConflictResolutionRaw = nil
+        entry.originalSyncState = .untracked
+        entry.syncStateUpdatedAt = .now
+        if entry.lastSyncErrorComponentRaw == SyncComponent.original.rawValue {
+            entry.lastSyncErrorComponentRaw = nil
+            entry.lastSyncErrorMessage = nil
+        }
     }
 
     private func markFailed(_ entry: PhotoEntry, message: String) {
