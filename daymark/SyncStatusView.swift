@@ -15,100 +15,25 @@ struct ICloudSyncDetailView: View {
 
     var body: some View {
         Form {
-            Section("Status") {
-                LabeledContent("iCloud") {
+            heroSection
+
+            Section {
+                LabeledContent("iCloud Account") {
                     Text(icloudLabel)
-                        .foregroundStyle(snapshot.iCloudAvailable ? Color.primary : Color.red)
+                        .foregroundStyle(snapshot.iCloudAvailable && !fellBackToLocal ? Color.primary : Color.red)
                 }
-                LabeledContent("State") {
-                    HStack(spacing: 7) {
-                        if snapshot.isRunning {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Text(snapshot.phase)
-                            .foregroundStyle(stateColor)
-                    }
-                }
-                LabeledContent("Last Confirmed") {
-                    if let date = snapshot.lastConfirmedAt {
-                        Text(date.formatted(.dateTime.month().day().hour().minute().second()))
-                    } else {
-                        Text("Never")
-                            .foregroundStyle(.secondary)
-                    }
+                LabeledContent("Last Synced") {
+                    Text(lastSyncedLabel)
+                        .foregroundStyle(.secondary)
                 }
             }
 
-            Section("Pending") {
-                byteRow(
-                    title: "Upload",
-                    count: snapshot.pendingUploadCount,
-                    bytes: snapshot.pendingUploadBytes,
-                    color: .orange
-                )
-                byteRow(
-                    title: "Download",
-                    count: snapshot.pendingDownloadCount,
-                    bytes: snapshot.pendingDownloadBytes,
-                    color: .blue
-                )
-            }
-
-            Section("This Run") {
-                LabeledContent("Uploaded") {
-                    Text(formatted(snapshot.uploadedBytes))
-                }
-                LabeledContent("Downloaded") {
-                    Text(formatted(snapshot.downloadedBytes))
-                }
-            }
-
-            if !snapshot.failures.isEmpty {
-                Section("Failures") {
-                    ForEach(snapshot.failures) { failure in
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(failure.component.label)
-                                .font(.subheadline.weight(.medium))
-                            Text(failure.message)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                    }
-                }
+            if needsAttention {
+                attentionSection
             }
 
             if !snapshot.conflicts.isEmpty {
-                Section {
-                    ForEach(snapshot.conflicts) { conflict in
-                        Button {
-                            selectedConflict = conflict
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(conflict.day.formatted(.dateTime.year().month().day()))
-                                        .foregroundStyle(.primary)
-                                    Text(
-                                        conflict.remoteIsPreserved
-                                            ? "Both versions preserved"
-                                            : "Waiting to preserve iCloud version"
-                                    )
-                                    .font(.caption)
-                                    .foregroundStyle(
-                                        conflict.remoteIsPreserved ? Color.secondary : Color.red
-                                    )
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Photo Conflicts")
-                } footer: {
-                    Text("Daymark keeps both files until you choose a version.")
-                }
+                conflictsSection
             }
 
             Section {
@@ -129,6 +54,8 @@ struct ICloudSyncDetailView: View {
                     Text(message)
                 }
             }
+
+            diagnosticsSection
         }
         .navigationTitle("iCloud Sync")
         .task {
@@ -136,6 +63,128 @@ struct ICloudSyncDetailView: View {
         }
         .sheet(item: $selectedConflict) { conflict in
             conflictSheet(conflict)
+        }
+    }
+
+    // MARK: - Hero
+
+    private var heroSection: some View {
+        Section {
+            VStack(spacing: 12) {
+                ZStack {
+                    if snapshot.isRunning {
+                        ProgressView()
+                            .controlSize(.large)
+                    } else {
+                        Image(systemName: state.icon)
+                            .font(.system(size: 38, weight: .medium))
+                            .foregroundStyle(state.tint)
+                    }
+                }
+                .frame(height: 44)
+
+                Text(state.title)
+                    .font(.title3.weight(.semibold))
+                Text(state.subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    // MARK: - Needs Attention
+
+    private var attentionSection: some View {
+        Section {
+            ForEach(snapshot.failures) { failure in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(failure.component.label)
+                        .font(.subheadline.weight(.medium))
+                    Text(failure.message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+            if !snapshot.failures.isEmpty {
+                Button {
+                    Task { await syncNow() }
+                } label: {
+                    Label("Retry Failed Items", systemImage: "arrow.clockwise")
+                }
+                .disabled(snapshot.isRunning || fellBackToLocal)
+            }
+        } header: {
+            Text("Needs Attention")
+        } footer: {
+            if !snapshot.conflicts.isEmpty {
+                Text("\(snapshot.conflicts.count) photo \(snapshot.conflicts.count == 1 ? "conflict needs" : "conflicts need") your choice below.")
+            }
+        }
+    }
+
+    private var conflictsSection: some View {
+        Section {
+            ForEach(snapshot.conflicts) { conflict in
+                Button {
+                    selectedConflict = conflict
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(conflict.day.formatted(.dateTime.year().month().day()))
+                                .foregroundStyle(.primary)
+                            Text(
+                                conflict.remoteIsPreserved
+                                    ? "Both versions preserved"
+                                    : "Waiting to preserve iCloud version"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(
+                                conflict.remoteIsPreserved ? Color.secondary : Color.red
+                            )
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+        } header: {
+            Text("Photo Conflicts")
+        } footer: {
+            Text("Daymark keeps both files until you choose a version.")
+        }
+    }
+
+    // MARK: - Diagnostics
+
+    private var diagnosticsSection: some View {
+        Section {
+            DisclosureGroup("Diagnostics") {
+                LabeledContent("Phase", value: snapshot.phase)
+                byteRow(
+                    title: "Pending Upload",
+                    count: snapshot.pendingUploadCount,
+                    bytes: snapshot.pendingUploadBytes,
+                    color: .orange
+                )
+                byteRow(
+                    title: "Pending Download",
+                    count: snapshot.pendingDownloadCount,
+                    bytes: snapshot.pendingDownloadBytes,
+                    color: .blue
+                )
+                LabeledContent("Uploaded (this run)") {
+                    Text(formatted(snapshot.uploadedBytes))
+                }
+                LabeledContent("Downloaded (this run)") {
+                    Text(formatted(snapshot.downloadedBytes))
+                }
+            }
+            .font(.subheadline)
         }
     }
 
@@ -271,9 +320,90 @@ struct ICloudSyncDetailView: View {
         return snapshot.iCloudAvailable ? "Connected" : "Unavailable"
     }
 
-    private var stateColor: Color {
-        if !snapshot.failures.isEmpty || !snapshot.conflicts.isEmpty { return .red }
-        return snapshot.isRunning ? .blue : .green
+    private var needsAttention: Bool {
+        !snapshot.failures.isEmpty || !snapshot.conflicts.isEmpty
+    }
+
+    private var pendingCount: Int {
+        snapshot.pendingUploadCount + snapshot.pendingDownloadCount
+    }
+
+    private var lastSyncedLabel: String {
+        guard let date = snapshot.lastConfirmedAt else { return "Never" }
+        return date.formatted(.relative(presentation: .named))
+    }
+
+    private struct StateInfo {
+        let icon: String
+        let tint: Color
+        let title: String
+        let subtitle: String
+    }
+
+    private var state: StateInfo {
+        if fellBackToLocal {
+            return StateInfo(
+                icon: "icloud.slash.fill",
+                tint: .secondary,
+                title: "Local Only",
+                subtitle: "iCloud sync is off. Your photos stay on this device."
+            )
+        }
+        if !snapshot.iCloudAvailable {
+            return StateInfo(
+                icon: "exclamationmark.icloud.fill",
+                tint: .orange,
+                title: "iCloud Unavailable",
+                subtitle: "Sign in to iCloud in Settings to keep your photos backed up."
+            )
+        }
+        if snapshot.isRunning {
+            return StateInfo(
+                icon: "arrow.triangle.2.circlepath.icloud.fill",
+                tint: .blue,
+                title: "Syncing…",
+                subtitle: runningSubtitle
+            )
+        }
+        if needsAttention {
+            let failures = snapshot.failures.count
+            let conflicts = snapshot.conflicts.count
+            var parts: [String] = []
+            if failures > 0 { parts.append("\(failures) \(failures == 1 ? "item" : "items") failed") }
+            if conflicts > 0 { parts.append("\(conflicts) photo \(conflicts == 1 ? "conflict" : "conflicts")") }
+            return StateInfo(
+                icon: "exclamationmark.icloud.fill",
+                tint: .red,
+                title: "Needs Attention",
+                subtitle: parts.joined(separator: " · ")
+            )
+        }
+        if pendingCount > 0 {
+            return StateInfo(
+                icon: "icloud.and.arrow.up.fill",
+                tint: .blue,
+                title: "Waiting to Sync",
+                subtitle: "\(pendingCount) \(pendingCount == 1 ? "item" : "items") waiting. Tap Sync Now to back them up."
+            )
+        }
+        return StateInfo(
+            icon: "checkmark.icloud.fill",
+            tint: .green,
+            title: "Up to Date",
+            subtitle: snapshot.lastConfirmedAt == nil
+                ? "Everything is backed up to iCloud."
+                : "Last synced \(lastSyncedLabel)."
+        )
+    }
+
+    private var runningSubtitle: String {
+        if snapshot.pendingUploadCount > 0 {
+            return "Uploading \(snapshot.pendingUploadCount) \(snapshot.pendingUploadCount == 1 ? "item" : "items")…"
+        }
+        if snapshot.pendingDownloadCount > 0 {
+            return "Downloading \(snapshot.pendingDownloadCount) \(snapshot.pendingDownloadCount == 1 ? "item" : "items")…"
+        }
+        return "Checking for changes…"
     }
 
     private func formatted(_ bytes: Int64) -> String {
