@@ -569,7 +569,13 @@ struct PhotoStore {
                     modelContext.insert(entry)
                 }
 
-                if let backupID = backupEntry.id {
+                if let backupID = backupEntry.id, entry.id != backupID {
+                    // Reusing an existing entry but adopting the backup's ID
+                    // orphans the old ID's cloud records; tombstone it so they
+                    // are removed and not resurrected as a duplicate.
+                    if existing != nil {
+                        PendingSyncDeletionStore.add(entryID: entry.id)
+                    }
                     entry.id = backupID
                 }
                 entry.day = normalizedDate
@@ -706,6 +712,10 @@ struct PhotoStore {
             keeper.day = day
             for duplicate in ordered.dropFirst() {
                 mergeMissingValues(from: duplicate, into: keeper)
+                // Tombstone the loser so its records are removed from the custom
+                // CloudKit zones and the metadata coordinator does not resurrect
+                // it on the next sync, which would recreate the duplicate.
+                PendingSyncDeletionStore.add(entryID: duplicate.id)
                 modelContext.delete(duplicate)
                 removedCount += 1
             }
@@ -714,6 +724,9 @@ struct PhotoStore {
 
         if removedCount > 0 {
             try modelContext.save()
+            Task.detached(priority: .utility) {
+                await SyncDeletionCoordinator().flush()
+            }
         }
         return removedCount
     }

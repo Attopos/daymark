@@ -241,7 +241,7 @@ struct CloudKitViewPhotoStore: ViewPhotoRemoteStore {
 
     init(
         container: CKContainer = CKContainer(identifier: "iCloud.com.shizhengcao.Daymark"),
-        zoneName: String = "DaymarkViewAssetsV1"
+        zoneName: String = SyncEnvironment.zoneName("DaymarkViewAssetsV1")
     ) {
         database = container.privateCloudDatabase
         zoneID = CKRecordZone.ID(zoneName: zoneName, ownerName: CKCurrentUserDefaultName)

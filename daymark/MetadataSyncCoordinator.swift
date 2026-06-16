@@ -326,7 +326,7 @@ struct CloudKitMetadataStore: MetadataRemoteStore {
 
     init(
         container: CKContainer = CKContainer(identifier: "iCloud.com.shizhengcao.Daymark"),
-        zoneName: String = "DaymarkMetadataV2"
+        zoneName: String = SyncEnvironment.zoneName("DaymarkMetadataV2")
     ) {
         database = container.privateCloudDatabase
         zoneID = CKRecordZone.ID(zoneName: zoneName, ownerName: CKCurrentUserDefaultName)

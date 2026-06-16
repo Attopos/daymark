@@ -51,7 +51,7 @@ struct SyncDeletionCoordinator {
         "DaymarkThumbnailAssetsV1",
         "DaymarkViewAssetsV1",
         "DaymarkOriginalAssetsV1",
-    ]
+    ].map(SyncEnvironment.zoneName)
 
     init(container: CKContainer = CKContainer(identifier: "iCloud.com.shizhengcao.Daymark")) {
         database = container.privateCloudDatabase

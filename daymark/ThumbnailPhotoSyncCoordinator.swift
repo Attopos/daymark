@@ -255,7 +255,7 @@ struct CloudKitThumbnailPhotoStore: ThumbnailPhotoRemoteStore {
 
     init(
         container: CKContainer = CKContainer(identifier: "iCloud.com.shizhengcao.Daymark"),
-        zoneName: String = "DaymarkThumbnailAssetsV1"
+        zoneName: String = SyncEnvironment.zoneName("DaymarkThumbnailAssetsV1")
     ) {
         database = container.privateCloudDatabase
         zoneID = CKRecordZone.ID(zoneName: zoneName, ownerName: CKCurrentUserDefaultName)
