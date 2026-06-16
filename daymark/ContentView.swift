@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @AppStorage("prefersDarkMode") private var prefersDarkMode = false
+    @AppStorage("hasCompletedWelcome") private var hasCompletedWelcome = false
     @Query private var entries: [PhotoEntry]
     @State private var isRunningAssetSync = false
     private let photoStore = PhotoStore()
@@ -27,21 +28,19 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(prefersDarkMode ? .dark : .light)
+        .fullScreenCover(isPresented: showingWelcome) {
+            WelcomeView {
+                hasCompletedWelcome = true
+            }
+            .preferredColorScheme(prefersDarkMode ? .dark : .light)
+        }
         .task(id: assetSyncKey) {
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled, !isRunningAssetSync else { return }
             isRunningAssetSync = true
             defer { isRunningAssetSync = false }
 
-#if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-runMetadataSyncExperiment") {
-                await MetadataSyncExperiment.run(
-                    arguments: ProcessInfo.processInfo.arguments,
-                    in: modelContext
-                )
-                return
-            }
-#endif
+            photoStore.purgeSentinelEntries(in: modelContext)
             await photoStore.migrateLegacyLibraryIfNeeded(in: modelContext)
             photoStore.backfillMetadata(for: entries, in: modelContext)
             do {
@@ -66,15 +65,14 @@ struct ContentView: View {
                 print("DAYMARK_SYNC_ENGINE_ERROR \(error.localizedDescription)")
 #endif
             }
-#if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-runOriginalSyncExperiment") {
-                await runOriginalSyncExperiment(entries: entries)
-            }
-            if ProcessInfo.processInfo.arguments.contains("-runOriginalInventoryExperiment") {
-                await runOriginalInventoryExperiment()
-            }
-#endif
         }
+    }
+
+    private var showingWelcome: Binding<Bool> {
+        Binding(
+            get: { !hasCompletedWelcome },
+            set: { if !$0 { hasCompletedWelcome = true } }
+        )
     }
 
     private var assetSyncKey: String {
@@ -97,41 +95,6 @@ struct ContentView: View {
             .sorted()
             .joined(separator: "|")
     }
-
-#if DEBUG
-    private func runOriginalSyncExperiment(entries: [PhotoEntry]) async {
-        do {
-            let summary = try await OriginalPhotoSyncCoordinator().syncOriginals(
-                entries: entries,
-                in: modelContext,
-                limits: OriginalPhotoSyncLimits(
-                    maximumTransferCount: 1,
-                    maximumTransferredBytes: 100 * 1_024 * 1_024
-                )
-            )
-            print(
-                "DAYMARK_SYNC_EXPERIMENT_RESULT " +
-                "uploaded=\(summary.uploadedCount) " +
-                "downloaded=\(summary.downloadedCount) " +
-                "conflicts=\(summary.conflictCount) " +
-                "failed=\(summary.failedCount) " +
-                "deferred=\(summary.deferredCount) " +
-                "bytes=\(summary.transferredBytes)"
-            )
-        } catch {
-            print("DAYMARK_SYNC_EXPERIMENT_ERROR \(error.localizedDescription)")
-        }
-    }
-
-    private func runOriginalInventoryExperiment() async {
-        do {
-            let inventory = try await CloudKitOriginalPhotoStore().inventory()
-            print("DAYMARK_INVENTORY_EXPERIMENT_RESULT records=\(inventory.count)")
-        } catch {
-            print("DAYMARK_INVENTORY_EXPERIMENT_ERROR \(error.localizedDescription)")
-        }
-    }
-#endif
 }
 
 #Preview {

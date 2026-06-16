@@ -475,6 +475,32 @@ struct PhotoStore {
         }
     }
 
+    /// Removes leaked debug/test sentinel entries (dated year 2100+). They are
+    /// deleted through the normal path so the deletion propagates to CloudKit
+    /// and is tombstoned, preventing the sync systems from resurrecting them.
+    /// Returns the number purged so callers can skip redundant work.
+    @discardableResult
+    func purgeSentinelEntries(in modelContext: ModelContext) -> Int {
+        let cutoff = PhotoEntry.sentinelDayCutoff
+        let descriptor = FetchDescriptor<PhotoEntry>(
+            predicate: #Predicate { $0.day >= cutoff }
+        )
+        guard let sentinels = try? modelContext.fetch(descriptor), !sentinels.isEmpty else {
+            return 0
+        }
+        for entry in sentinels {
+            try? deleteEntry(entry, in: modelContext)
+        }
+        return sentinels.count
+    }
+
+    func deleteAllEntries(in modelContext: ModelContext) throws {
+        let entries = try modelContext.fetch(FetchDescriptor<PhotoEntry>())
+        for entry in entries {
+            try deleteEntry(entry, in: modelContext)
+        }
+    }
+
     func parseBackup(from url: URL) throws -> BackupContents {
         let didAccessSecurityScope = url.startAccessingSecurityScopedResource()
         defer {

@@ -116,6 +116,11 @@ struct MetadataSyncCoordinator {
             }
         }
         let staleRemoteIDs = remoteByID.values.compactMap { remote -> String? in
+            // Debug/test sentinels (dated year 2100+) leaked into CloudKit and
+            // must never be resurrected; delete them from the cloud outright.
+            if remote.metadata.snapshot.day >= PhotoEntry.sentinelDayCutoff {
+                return remote.entryID
+            }
             let day = Calendar.current.startOfDay(for: remote.metadata.snapshot.day)
             guard let local = localByDay[day], local.id != remote.entryID else { return nil }
             return remote.entryID

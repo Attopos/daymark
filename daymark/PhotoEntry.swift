@@ -3,6 +3,12 @@ import SwiftData
 
 @Model
 final class PhotoEntry {
+    /// Entries dated on or after this point are debug/test sentinels (the
+    /// metadata-sync experiment seeds a record dated 2100-01-01 UTC). They are
+    /// never legitimate user content and are purged so they cannot churn
+    /// between sync systems and crash the app.
+    static let sentinelDayCutoff = Date(timeIntervalSince1970: 4_102_444_800)
+
     var id: String = UUID().uuidString
     var day: Date = Date.distantPast
     @Attribute(.externalStorage) var imageData: Data?
