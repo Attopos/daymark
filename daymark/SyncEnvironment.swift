@@ -33,4 +33,16 @@ enum SyncEnvironment {
         nil
         #endif
     }
+
+    /// Dedicated, local-only store URL for the anonymous (no-account) scope so
+    /// its data never mixes with the signed-in / iCloud data. Scoped per build
+    /// environment so Debug and Production anonymous stores stay separate too.
+    static var anonymousStoreURL: URL {
+        #if DEBUG
+        let name = "Daymark-Dev-Anonymous.store"
+        #else
+        let name = "Daymark-Anonymous.store"
+        #endif
+        return URL.applicationSupportDirectory.appending(path: name)
+    }
 }

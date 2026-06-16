@@ -13,6 +13,10 @@ final class AuthManager: NSObject {
     private let userNameKey = "appleUserName"
     private let userEmailKey = "appleUserEmail"
 
+    /// Shared with ContentView's `@AppStorage`. Reset on sign out so the user
+    /// is returned to the welcome screen.
+    static let hasCompletedWelcomeKey = "hasCompletedWelcome"
+
     private var signInContinuation: CheckedContinuation<Void, Never>?
 
     override init() {
@@ -59,6 +63,8 @@ final class AuthManager: NSObject {
         UserDefaults.standard.removeObject(forKey: userIDKey)
         UserDefaults.standard.removeObject(forKey: userNameKey)
         UserDefaults.standard.removeObject(forKey: userEmailKey)
+        // Return the user to the welcome screen after signing out.
+        UserDefaults.standard.set(false, forKey: Self.hasCompletedWelcomeKey)
         isSignedIn = false
         userName = nil
         userEmail = nil

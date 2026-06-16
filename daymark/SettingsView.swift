@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(AppDataController.self) private var dataController
     @Query(sort: \PhotoEntry.day, order: .reverse) private var entries: [PhotoEntry]
 
     @Binding var prefersDarkMode: Bool
@@ -244,6 +245,12 @@ struct SettingsView: View {
                 return
             }
 
+            guard dataController.isCloudSyncEnabled else {
+                statusMessage = "Imported \(backup.payload.entries.count) entries. Sign in to back them up to iCloud."
+                isImporting = false
+                return
+            }
+
             do {
                 let importedEntries = try modelContext.fetch(FetchDescriptor<PhotoEntry>())
                 try await SyncEngine().sync(
@@ -268,5 +275,7 @@ struct SettingsView: View {
 
 #Preview {
     SettingsView(prefersDarkMode: .constant(false))
+        .environment(AuthManager())
+        .environment(AppDataController(scope: .anonymous))
         .modelContainer(for: PhotoEntry.self, inMemory: true)
 }

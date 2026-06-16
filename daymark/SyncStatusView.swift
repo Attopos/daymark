@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ICloudSyncDetailView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(AppDataController.self) private var dataController
     @Query(sort: \PhotoEntry.day, order: .reverse) private var entries: [PhotoEntry]
     @AppStorage("cloudKitFallbackToLocal") private var fellBackToLocal = false
 
@@ -48,10 +49,12 @@ struct ICloudSyncDetailView: View {
                         }
                     }
                 }
-                .disabled(snapshot.isRunning || fellBackToLocal)
+                .disabled(snapshot.isRunning || fellBackToLocal || !dataController.isCloudSyncEnabled)
             } footer: {
                 if let message {
                     Text(message)
+                } else if !dataController.isCloudSyncEnabled {
+                    Text("Sign in with your Apple account to back up and sync your photos with iCloud.")
                 }
             }
 
@@ -275,6 +278,10 @@ struct ICloudSyncDetailView: View {
 
     private func syncNow() async {
         message = nil
+        guard dataController.isCloudSyncEnabled else {
+            message = "Sign in to enable iCloud sync."
+            return
+        }
         do {
             try await SyncEngine().sync(
                 entries: entries,

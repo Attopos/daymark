@@ -3,8 +3,9 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(AppDataController.self) private var dataController
     @AppStorage("prefersDarkMode") private var prefersDarkMode = false
-    @AppStorage("hasCompletedWelcome") private var hasCompletedWelcome = false
+    @AppStorage(AuthManager.hasCompletedWelcomeKey) private var hasCompletedWelcome = false
     @Query private var entries: [PhotoEntry]
     @State private var isRunningAssetSync = false
     private let photoStore = PhotoStore()
@@ -53,6 +54,9 @@ struct ContentView: View {
             let currentEntries = (try? modelContext.fetch(FetchDescriptor<PhotoEntry>())) ?? entries
             photoStore.migrateEmbeddedThumbnails(for: currentEntries, in: modelContext)
             await photoStore.backfillViewPhotos(for: currentEntries, in: modelContext)
+
+            // The anonymous scope is strictly local — never touch CloudKit.
+            guard dataController.isCloudSyncEnabled else { return }
             do {
                 try await SyncEngine().sync(
                     entries: currentEntries,
@@ -99,5 +103,7 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+        .environment(AuthManager())
+        .environment(AppDataController(scope: .anonymous))
         .modelContainer(for: PhotoEntry.self, inMemory: true)
 }
