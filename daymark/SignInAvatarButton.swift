@@ -64,7 +64,7 @@ private struct ProfileView: View {
                         .padding(.top, 24)
 
                     VStack(spacing: 4) {
-                        Text(authManager.userName ?? "Daymark User")
+                        Text(authManager.displayName)
                             .font(.title2.weight(.bold))
 
                         if let email = authManager.userEmail {

@@ -31,6 +31,20 @@ final class AuthManager: NSObject {
         return initials.isEmpty ? nil : initials
     }
 
+    /// Name to show in the profile. Prefers the Apple account name captured at
+    /// sign-in. Apple only returns the full name on the first authorization, so
+    /// when signed in without a captured name we fall back to the email or a
+    /// neutral account label. "Daymark User" is used only in the no-account case.
+    var displayName: String {
+        if let userName, !userName.isEmpty {
+            return userName
+        }
+        if isSignedIn {
+            return userEmail ?? "Apple Account"
+        }
+        return "Daymark User"
+    }
+
     func handleSignInResult(_ result: Result<ASAuthorization, any Error>) {
         switch result {
         case .success(let authorization):
