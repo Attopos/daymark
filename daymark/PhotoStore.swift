@@ -496,8 +496,49 @@ struct PhotoStore {
 
     func deleteAllEntries(in modelContext: ModelContext) throws {
         let entries = try modelContext.fetch(FetchDescriptor<PhotoEntry>())
+        guard !entries.isEmpty else { return }
+
+        var originalFilenames: [String] = []
+        var thumbnailFilenames: [String] = []
+        var viewPhotoFilenames: [String] = []
+        var conflictPhotoFilenames: [String] = []
+
         for entry in entries {
-            try deleteEntry(entry, in: modelContext)
+            if let filename = entry.localOriginalFilename {
+                originalFilenames.append(filename)
+            }
+            if let filename = entry.localThumbnailFilename {
+                thumbnailFilenames.append(filename)
+            }
+            if let filename = entry.localViewPhotoFilename {
+                viewPhotoFilenames.append(filename)
+            }
+            if let filename = entry.originalConflictRemoteFilename {
+                conflictPhotoFilenames.append(filename)
+            }
+
+            invalidateCaches(for: entry)
+            PendingSyncDeletionStore.add(entryID: entry.id)
+            modelContext.delete(entry)
+        }
+
+        try modelContext.save()
+
+        for filename in originalFilenames {
+            try? originalFileStore.remove(filename: filename)
+        }
+        for filename in thumbnailFilenames {
+            try? thumbnailFileStore.remove(filename: filename)
+        }
+        for filename in viewPhotoFilenames {
+            try? viewPhotoFileStore.remove(filename: filename)
+        }
+        for filename in conflictPhotoFilenames {
+            try? conflictPhotoFileStore.remove(filename: filename)
+        }
+
+        Task.detached(priority: .utility) {
+            await SyncDeletionCoordinator().flush()
         }
     }
 

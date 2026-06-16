@@ -5,7 +5,6 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppDataController.self) private var dataController
     @AppStorage("prefersDarkMode") private var prefersDarkMode = false
-    @AppStorage(AuthManager.hasCompletedWelcomeKey) private var hasCompletedWelcome = false
     @Query private var entries: [PhotoEntry]
     @State private var isRunningAssetSync = false
     private let photoStore = PhotoStore()
@@ -29,12 +28,6 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(prefersDarkMode ? .dark : .light)
-        .fullScreenCover(isPresented: showingWelcome) {
-            WelcomeView {
-                hasCompletedWelcome = true
-            }
-            .preferredColorScheme(prefersDarkMode ? .dark : .light)
-        }
         .task(id: assetSyncKey) {
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled, !isRunningAssetSync else { return }
@@ -70,13 +63,6 @@ struct ContentView: View {
 #endif
             }
         }
-    }
-
-    private var showingWelcome: Binding<Bool> {
-        Binding(
-            get: { !hasCompletedWelcome },
-            set: { if !$0 { hasCompletedWelcome = true } }
-        )
     }
 
     /// A cheap signature over the fields that warrant re-running sync/backfill.

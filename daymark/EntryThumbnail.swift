@@ -13,7 +13,7 @@ final class ThumbnailImageLoader: @unchecked Sendable {
 
     /// Stable key that changes when the entry's thumbnail file changes (e.g. an
     /// edit), so an updated photo reloads instead of showing a stale cache hit.
-    static func identity(for entry: PhotoEntry) -> String {
+    nonisolated static func identity(for entry: PhotoEntry) -> String {
         "\(entry.id)|\(entry.localThumbnailFilename ?? "embedded")"
     }
 
@@ -41,10 +41,10 @@ final class ThumbnailImageLoader: @unchecked Sendable {
         return image
     }
 
-    private static func decode(filename: String?, embedded: Data?) -> UIImage? {
+    private nonisolated static func decode(filename: String?, embedded: Data?) -> UIImage? {
         let data: Data?
         if let filename {
-            data = try? ThumbnailPhotoFileStore().read(filename: filename)
+            data = try? Data(contentsOf: thumbnailURL(for: filename), options: [.mappedIfSafe])
         } else {
             data = embedded
         }
@@ -52,6 +52,21 @@ final class ThumbnailImageLoader: @unchecked Sendable {
         // preparingForDisplay() forces the decode here (off-main) instead of on
         // the first draw, keeping the render pass cheap.
         return UIImage(data: data)?.preparingForDisplay()
+    }
+
+    private nonisolated static func thumbnailURL(for filename: String) throws -> URL {
+        guard filename == URL(fileURLWithPath: filename).lastPathComponent,
+              filename.hasSuffix(".thumb") else {
+            throw OriginalPhotoFileStoreError.invalidFilename
+        }
+
+        return FileManager.default.urls(
+            for: .cachesDirectory,
+            in: .userDomainMask
+        )[0]
+        .appendingPathComponent("Daymark", isDirectory: true)
+        .appendingPathComponent("Thumbnails", isDirectory: true)
+        .appendingPathComponent(filename, isDirectory: false)
     }
 }
 

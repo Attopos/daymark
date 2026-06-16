@@ -74,11 +74,15 @@ final class AuthManager: NSObject {
     }
 
     func signOut() {
+        clearStoredAccount()
+        // Return the user to the welcome screen after signing out.
+        UserDefaults.standard.set(false, forKey: Self.hasCompletedWelcomeKey)
+    }
+
+    func clearStoredAccount() {
         UserDefaults.standard.removeObject(forKey: userIDKey)
         UserDefaults.standard.removeObject(forKey: userNameKey)
         UserDefaults.standard.removeObject(forKey: userEmailKey)
-        // Return the user to the welcome screen after signing out.
-        UserDefaults.standard.set(false, forKey: Self.hasCompletedWelcomeKey)
         isSignedIn = false
         userName = nil
         userEmail = nil

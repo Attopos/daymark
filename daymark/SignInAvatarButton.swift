@@ -49,6 +49,7 @@ private struct ProfileView: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(AuthManager.hasCompletedWelcomeKey) private var hasCompletedWelcome = false
 
     private let photoStore = PhotoStore()
 
@@ -176,9 +177,11 @@ private struct ProfileView: View {
         Task {
             do {
                 try photoStore.deleteAllEntries(in: modelContext)
-                authManager.signOut()
                 isDeleting = false
                 dismiss()
+                await Task.yield()
+                hasCompletedWelcome = false
+                authManager.clearStoredAccount()
             } catch {
                 errorMessage = error.localizedDescription
                 isDeleting = false

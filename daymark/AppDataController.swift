@@ -5,7 +5,7 @@ import SwiftData
 /// The data partition currently in use. Each scope is backed by a distinct
 /// on-disk store so that signed-in (iCloud-synced) data and anonymous data are
 /// never visible to each other.
-enum DataScope: Equatable {
+enum DataScope: Hashable {
     /// Signed in with an Apple account: the canonical store with CloudKit sync.
     case signedIn
     /// No account: a separate, local-only store that starts empty.

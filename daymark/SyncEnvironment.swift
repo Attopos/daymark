@@ -10,7 +10,7 @@ import Foundation
 /// existing users' data is untouched.
 enum SyncEnvironment {
     /// Suffix appended to every custom CloudKit zone name in Debug builds.
-    static let zoneSuffix: String = {
+    nonisolated static let zoneSuffix: String = {
         #if DEBUG
         "-Dev"
         #else
@@ -19,7 +19,7 @@ enum SyncEnvironment {
     }()
 
     /// Applies the environment suffix to a base zone name.
-    static func zoneName(_ base: String) -> String {
+    nonisolated static func zoneName(_ base: String) -> String {
         base + zoneSuffix
     }
 

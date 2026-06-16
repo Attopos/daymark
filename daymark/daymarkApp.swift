@@ -6,6 +6,8 @@ struct DaymarkApp: App {
     @State private var authManager: AuthManager
     @State private var dataController: AppDataController
     @State private var locationLocalizer = LocationLocalizer()
+    @AppStorage(AuthManager.hasCompletedWelcomeKey) private var hasCompletedWelcome = false
+    @AppStorage("prefersDarkMode") private var prefersDarkMode = false
 
     init() {
         let authManager = AuthManager()
@@ -17,7 +19,18 @@ struct DaymarkApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            Group {
+                if hasCompletedWelcome {
+                    ContentView()
+                        .id(dataController.scope)
+                        .modelContainer(dataController.container)
+                } else {
+                    WelcomeView {
+                        hasCompletedWelcome = true
+                    }
+                }
+            }
+                .preferredColorScheme(prefersDarkMode ? .dark : .light)
                 .environment(authManager)
                 .environment(dataController)
                 .environment(locationLocalizer)
