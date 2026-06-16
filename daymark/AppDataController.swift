@@ -75,7 +75,7 @@ final class AppDataController {
     }
 
     private static func storeURL(for scope: DataScope) -> URL? {
-        switch scope {
+        let url: URL? = switch scope {
         case .signedIn:
             // Canonical synced store: the existing default location in
             // Production (nil → SwiftData default), or the dedicated Debug store.
@@ -83,5 +83,16 @@ final class AppDataController {
         case .anonymous:
             SyncEnvironment.anonymousStoreURL
         }
+
+        // Unlike SwiftData's default store location, an explicit store URL does
+        // not auto-create its parent directory. Application Support may not exist
+        // yet on first launch, so create it or the container fails to open.
+        if let url {
+            try? FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+        }
+        return url
     }
 }
