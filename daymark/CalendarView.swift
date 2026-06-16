@@ -390,7 +390,7 @@ struct CalendarView: View {
 
     private func photoTile(for entry: PhotoEntry, size: CGFloat) -> some View {
         MarkCard(
-            image: photoStore.thumbnail(for: entry),
+            entry: entry,
             dayText: dayLabel(for: entry.day),
             subtitleText: nil,
             flagEmoji: entry.flagEmoji,
@@ -702,7 +702,7 @@ private extension Calendar {
 }
 
 struct MarkCard: View {
-    let image: UIImage?
+    let entry: PhotoEntry
     let dayText: String
     let subtitleText: String?
     let flagEmoji: String?
@@ -711,12 +711,8 @@ struct MarkCard: View {
     var body: some View {
         if size > 0 {
             ZStack {
-                Group {
-                    if let image {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
+                EntryThumbnail(entry: entry) {
+                    ZStack {
                         LinearGradient(
                             colors: [Color(.secondarySystemBackground), Color(.systemGray6)],
                             startPoint: .topLeading,

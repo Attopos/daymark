@@ -6,7 +6,6 @@ struct SearchView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(LocationLocalizer.self) private var locationLocalizer
     @Query(sort: \PhotoEntry.day, order: .reverse) private var allEntries: [PhotoEntry]
-    private let photoStore = PhotoStore()
     private let calendar = Calendar.current
     private let autoActivateSearch: Bool
 
@@ -55,7 +54,7 @@ struct SearchView: View {
                         ForEach(filteredEntries) { entry in
                             NavigationLink(value: entry) {
                                 MarkCard(
-                                    image: photoStore.thumbnail(for: entry),
+                                    entry: entry,
                                     dayText: dayLabel(for: entry.day),
                                     subtitleText: locationLocalizer.localizedCity(for: entry) ?? entry.day.formatted(.dateTime.month(.abbreviated).year()),
                                     flagEmoji: entry.flagEmoji,

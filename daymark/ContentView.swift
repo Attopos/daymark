@@ -79,25 +79,27 @@ struct ContentView: View {
         )
     }
 
-    private var assetSyncKey: String {
-        entries
-            .map {
-                [
-                    $0.id,
-                    $0.originalContentHash ?? "",
-                    $0.day.timeIntervalSince1970.description,
-                    $0.captureDate?.timeIntervalSince1970.description ?? "",
-                    $0.latitude?.description ?? "",
-                    $0.longitude?.description ?? "",
-                    $0.timezone ?? "",
-                    $0.countryCode ?? "",
-                    $0.countryName ?? "",
-                    $0.city ?? "",
-                    $0.caption ?? "",
-                ].joined(separator: ":")
-            }
-            .sorted()
-            .joined(separator: "|")
+    /// A cheap signature over the fields that warrant re-running sync/backfill.
+    /// Order-independent (per-entry hashes are wrap-added) so it avoids the
+    /// large string allocation and sort the old key did on every data change.
+    private var assetSyncKey: Int {
+        var combined = entries.count
+        for entry in entries {
+            var hasher = Hasher()
+            hasher.combine(entry.id)
+            hasher.combine(entry.originalContentHash)
+            hasher.combine(entry.day)
+            hasher.combine(entry.captureDate)
+            hasher.combine(entry.latitude)
+            hasher.combine(entry.longitude)
+            hasher.combine(entry.timezone)
+            hasher.combine(entry.countryCode)
+            hasher.combine(entry.countryName)
+            hasher.combine(entry.city)
+            hasher.combine(entry.caption)
+            combined = combined &+ hasher.finalize()
+        }
+        return combined
     }
 }
 

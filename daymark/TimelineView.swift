@@ -6,8 +6,6 @@ struct TimelineView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \PhotoEntry.day, order: .reverse) private var entries: [PhotoEntry]
 
-    private let photoStore = PhotoStore()
-
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -18,7 +16,6 @@ struct TimelineView: View {
                             NavigationLink(value: entry) {
                                 TimelineCardRow(
                                     entry: entry,
-                                    image: photoStore.thumbnail(for: entry),
                                     isFirst: index == 0,
                                     isLast: index == timelineItems.count - 1
                                 )
@@ -83,7 +80,6 @@ struct TimelineView: View {
 
 private struct TimelineCardRow: View {
     let entry: PhotoEntry
-    let image: UIImage?
     let isFirst: Bool
     let isLast: Bool
 
@@ -138,19 +134,13 @@ private struct TimelineCardRow: View {
 
     private var timelineCard: some View {
         HStack(spacing: 14) {
-            Group {
-                if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    Color(.secondarySystemBackground)
-                        .overlay {
-                            Image(systemName: "photo")
-                                .font(.system(size: 24))
-                                .foregroundStyle(.secondary)
-                        }
-                }
+            EntryThumbnail(entry: entry) {
+                Color(.secondarySystemBackground)
+                    .overlay {
+                        Image(systemName: "photo")
+                            .font(.system(size: 24))
+                            .foregroundStyle(.secondary)
+                    }
             }
             .frame(width: 110, height: 110)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))

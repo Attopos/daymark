@@ -7,7 +7,6 @@ import SwiftUI
 struct MapView: View {
     @Query(sort: \PhotoEntry.day, order: .reverse) private var entries: [PhotoEntry]
     @Namespace private var mapScope
-    private let photoStore = PhotoStore()
     @StateObject private var locationManager = DaymarkLocationManager()
     @State private var position: MapCameraPosition = .userLocation(
         followsHeading: false,
@@ -25,7 +24,7 @@ struct MapView: View {
 
                 ForEach(locatedEntries) { entry in
                     Annotation(daymarkTitle(for: entry), coordinate: coordinate(for: entry), anchor: .bottom) {
-                        PhotoMapAnnotation(image: photoStore.thumbnail(for: entry))
+                        PhotoMapAnnotation(entry: entry)
                     }
                 }
             }
@@ -150,16 +149,12 @@ final class DaymarkLocationManager: NSObject, ObservableObject, CLLocationManage
 }
 
 struct PhotoMapAnnotation: View {
-    let image: UIImage?
+    let entry: PhotoEntry
 
     var body: some View {
         VStack(spacing: 0) {
-            Group {
-                if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                } else {
+            EntryThumbnail(entry: entry) {
+                ZStack {
                     Color(.secondarySystemBackground)
 
                     Image(systemName: "photo")

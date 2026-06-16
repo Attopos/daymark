@@ -12,7 +12,6 @@ struct LocationPickerView: View {
 
     @Namespace private var mapScope
     @StateObject private var locationManager = DaymarkLocationManager()
-    private let photoStore = PhotoStore()
     @State private var didCenterOnUser = false
     @State private var selectedCoordinate: CLLocationCoordinate2D?
     @State private var city: String?
@@ -44,7 +43,7 @@ struct LocationPickerView: View {
 
                         ForEach(locatedEntries) { entry in
                             Annotation("", coordinate: CLLocationCoordinate2D(latitude: entry.latitude ?? 0, longitude: entry.longitude ?? 0), anchor: .bottom) {
-                                PhotoMapAnnotation(image: photoStore.thumbnail(for: entry))
+                                PhotoMapAnnotation(entry: entry)
                             }
                         }
                     }
