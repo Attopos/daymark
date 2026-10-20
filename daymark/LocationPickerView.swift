@@ -17,6 +17,7 @@ struct LocationPickerView: View {
     @State private var city: String?
     @State private var countryCode: String?
     @State private var countryName: String?
+    @State private var isResolvingLocation = false
     @State private var searchText = ""
     @State private var searchResults: [MKMapItem] = []
     @State private var isSearching = false
@@ -58,10 +59,7 @@ struct LocationPickerView: View {
                     .onTapGesture { screenPosition in
                         isSearching = false
                         if let coordinate = proxy.convert(screenPosition, from: .local) {
-                            selectedCoordinate = coordinate
-                            Task {
-                                await reverseGeocode(coordinate)
-                            }
+                            selectCoordinate(coordinate)
                         }
                     }
                 }
@@ -84,7 +82,7 @@ struct LocationPickerView: View {
                 didCenterOnUser = true
                 position = .region(region)
             }
-            .navigationTitle("Choose Location")
+            .daymarkNavigationTitle("Choose Location", inline: true)
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, isPresented: $isSearching, prompt: "Search places")
             .searchSuggestions {
@@ -113,6 +111,10 @@ struct LocationPickerView: View {
                 guard !Task.isCancelled else { return }
                 await performSearch()
             }
+            .task(id: selectedCoordinate.map { "\($0.latitude),\($0.longitude)" }) {
+                guard let coordinate = selectedCoordinate else { return }
+                await reverseGeocode(coordinate)
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -131,7 +133,7 @@ struct LocationPickerView: View {
                         )
                         dismiss()
                     }
-                    .disabled(selectedCoordinate == nil)
+                    .disabled(selectedCoordinate == nil || isResolvingLocation)
                 }
             }
         }
@@ -156,7 +158,7 @@ struct LocationPickerView: View {
 
     private func selectSearchResult(_ item: MKMapItem) {
         let coordinate = item.location.coordinate
-        selectedCoordinate = coordinate
+        selectCoordinate(coordinate)
         position = .region(
             MKCoordinateRegion(
                 center: coordinate,
@@ -164,9 +166,18 @@ struct LocationPickerView: View {
             )
         )
         city = item.addressRepresentations?.cityName
-        countryCode = item.addressRepresentations?.region?.identifier
         countryName = item.addressRepresentations?.regionName
         searchText = ""
+    }
+
+    private func selectCoordinate(_ coordinate: CLLocationCoordinate2D) {
+        guard selectedCoordinate?.latitude != coordinate.latitude ||
+                selectedCoordinate?.longitude != coordinate.longitude else { return }
+        city = nil
+        countryCode = nil
+        countryName = nil
+        isResolvingLocation = true
+        selectedCoordinate = coordinate
     }
 
     private func performSearch() async {
@@ -185,16 +196,17 @@ struct LocationPickerView: View {
     }
 
     private func reverseGeocode(_ coordinate: CLLocationCoordinate2D) async {
-        city = nil
-        countryCode = nil
-        countryName = nil
-
-        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-        guard let request = MKReverseGeocodingRequest(location: location) else { return }
-        guard let mapItem = try? await request.mapItems.first else { return }
-
-        city = mapItem.addressRepresentations?.cityName
-        countryCode = mapItem.addressRepresentations?.region?.identifier
-        countryName = mapItem.addressRepresentations?.regionName
+        let details = await LocationGeocoder.reverseGeocode(
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            preferredLocale: .current
+        )
+        guard !Task.isCancelled,
+              selectedCoordinate?.latitude == coordinate.latitude,
+              selectedCoordinate?.longitude == coordinate.longitude else { return }
+        city = details.city ?? city
+        countryCode = details.countryCode
+        countryName = details.countryName ?? countryName
+        isResolvingLocation = false
     }
 }

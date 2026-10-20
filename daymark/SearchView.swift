@@ -46,8 +46,8 @@ struct SearchView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("\(filteredEntries.count) photo\(filteredEntries.count == 1 ? "" : "s")")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(DaymarkTypography.metadata)
+                        .foregroundStyle(DaymarkPalette.secondaryInk)
                         .padding(.horizontal, 16)
 
                     LazyVGrid(columns: columns(for: metrics), spacing: metrics.gridSpacing) {
@@ -70,7 +70,8 @@ struct SearchView: View {
                 .padding(.bottom, metrics.bottomPadding)
             }
         }
-        .navigationTitle("Search")
+        .background(DaymarkPalette.paper)
+        .daymarkNavigationTitle("Search")
         .toolbarTitleDisplayMode(.inlineLarge)
         .searchable(
             text: $searchText,
@@ -92,6 +93,7 @@ struct SearchView: View {
             guard autoActivateSearch, didAutoActivateSearch, !isPresented else { return }
             dismiss()
         }
+        .daymarkScreen()
     }
 
     // MARK: - Layout

@@ -60,7 +60,9 @@ struct ICloudSyncDetailView: View {
 
             diagnosticsSection
         }
-        .navigationTitle("iCloud Sync")
+        .scrollContentBackground(.hidden)
+        .daymarkScreen()
+        .daymarkNavigationTitle("iCloud Sync")
         .task {
             await SyncEngine().refresh(entries: entries)
         }
@@ -87,7 +89,7 @@ struct ICloudSyncDetailView: View {
                 .frame(height: 44)
 
                 Text(state.title)
-                    .font(.title3.weight(.semibold))
+                    .font(DaymarkTypography.sectionTitle)
                 Text(state.subtitle)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -213,7 +215,7 @@ struct ICloudSyncDetailView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Choose Photo")
+            .daymarkNavigationTitle("Choose Photo", inline: true)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

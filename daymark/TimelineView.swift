@@ -33,7 +33,8 @@ struct TimelineView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 20)
             }
-            .navigationTitle("Timeline")
+            .background(DaymarkPalette.paper)
+            .daymarkNavigationTitle("Timeline")
             .toolbarTitleDisplayMode(.inlineLarge)
             .navigationDestination(for: PhotoEntry.self) { entry in
                 PhotoDetailView(entry: entry)
@@ -47,6 +48,7 @@ struct TimelineView: View {
                     )
                 }
             }
+            .daymarkScreen()
         }
     }
 
@@ -85,7 +87,7 @@ private struct TimelineCardRow: View {
 
     private let calendar = Calendar.current
     private let dotSize: CGFloat = 14
-    private let lineWidth: CGFloat = 2.5
+    private let lineWidth: CGFloat = 1
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -99,17 +101,21 @@ private struct TimelineCardRow: View {
     private var dateLabel: some View {
         VStack(spacing: 3) {
             Text(entry.day.formatted(.dateTime.day()))
-                .font(.system(size: 22, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
+                .font(DaymarkTypography.timelineDay)
+                .foregroundStyle(DaymarkPalette.ink)
             Text(entry.day.formatted(.dateTime.month(.abbreviated)))
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(.secondary)
+                .font(DaymarkTypography.timelineMonth)
+                .foregroundStyle(DaymarkPalette.secondaryInk)
             if !calendar.isDate(entry.day, equalTo: .now, toGranularity: .year) {
                 Text(entry.day.formatted(.dateTime.year()))
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    .font(DaymarkTypography.timelineYear)
+                    .foregroundStyle(DaymarkPalette.secondaryInk)
             }
         }
+        .lineLimit(1)
+        .minimumScaleFactor(0.5)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(entry.day.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
         .frame(width: 50)
         .padding(.top, 14)
     }
@@ -117,15 +123,15 @@ private struct TimelineCardRow: View {
     private var timelineIndicator: some View {
         VStack(spacing: 0) {
             Rectangle()
-                .fill(isFirst ? .clear : Color.primary.opacity(0.12))
+                .fill(isFirst ? .clear : DaymarkPalette.rule)
                 .frame(width: lineWidth, height: 22)
 
             Circle()
-                .fill(calendar.isDateInToday(entry.day) ? Color.accentColor : Color.primary.opacity(0.28))
+                .fill(calendar.isDateInToday(entry.day) ? DaymarkPalette.accent : DaymarkPalette.accent.opacity(0.3))
                 .frame(width: dotSize, height: dotSize)
 
             Rectangle()
-                .fill(isLast ? .clear : Color.primary.opacity(0.12))
+                .fill(isLast ? .clear : DaymarkPalette.rule)
                 .frame(width: lineWidth)
                 .frame(maxHeight: .infinity)
         }
@@ -135,11 +141,11 @@ private struct TimelineCardRow: View {
     private var timelineCard: some View {
         HStack(spacing: 14) {
             EntryThumbnail(entry: entry) {
-                Color(.secondarySystemBackground)
+                DaymarkPalette.recessed
                     .overlay {
                         Image(systemName: "photo")
                             .font(.system(size: 24))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(DaymarkPalette.secondaryInk)
                     }
             }
             .frame(width: 110, height: 110)
@@ -148,15 +154,15 @@ private struct TimelineCardRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 if let city = entry.city {
                     Text(city)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.primary)
+                        .font(DaymarkTypography.entryTitle)
+                        .foregroundStyle(DaymarkPalette.ink)
                         .lineLimit(1)
                 }
 
                 if let countryName = entry.countryName {
                     Text(countryName)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .font(DaymarkTypography.metadata)
+                        .foregroundStyle(DaymarkPalette.secondaryInk)
                         .lineLimit(1)
                 }
             }
@@ -167,11 +173,16 @@ private struct TimelineCardRow: View {
                 Text(flagEmoji)
                     .font(.system(size: 32))
                     .frame(width: 48, height: 48)
-                    .background(Color(.tertiarySystemBackground), in: Circle())
+                    .background(DaymarkPalette.recessed, in: Circle())
             }
         }
         .padding(12)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(DaymarkPalette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(DaymarkPalette.rule, lineWidth: 0.75)
+        }
+        .shadow(color: DaymarkPalette.shadow, radius: 3, x: 0, y: 2)
     }
 }
 
@@ -179,7 +190,7 @@ private struct TimelineGapRow: View {
     let isFirst: Bool
     let isLast: Bool
 
-    private let lineWidth: CGFloat = 2.5
+    private let lineWidth: CGFloat = 1
     private let gapDotSize: CGFloat = 4
 
     var body: some View {
@@ -189,24 +200,24 @@ private struct TimelineGapRow: View {
 
             VStack(spacing: 0) {
                 Rectangle()
-                    .fill(isFirst ? .clear : Color.primary.opacity(0.12))
+                    .fill(isFirst ? .clear : DaymarkPalette.rule)
                     .frame(width: lineWidth, height: 10)
 
                 VStack(spacing: 5) {
                     Circle()
-                        .fill(Color.secondary)
+                        .fill(DaymarkPalette.accent.opacity(0.3))
                         .frame(width: gapDotSize, height: gapDotSize)
                     Circle()
-                        .fill(Color.secondary)
+                        .fill(DaymarkPalette.accent.opacity(0.3))
                         .frame(width: gapDotSize, height: gapDotSize)
                     Circle()
-                        .fill(Color.secondary)
+                        .fill(DaymarkPalette.accent.opacity(0.3))
                         .frame(width: gapDotSize, height: gapDotSize)
                 }
                 .frame(width: 24, height: 24)
 
                 Rectangle()
-                    .fill(isLast ? .clear : Color.primary.opacity(0.12))
+                    .fill(isLast ? .clear : DaymarkPalette.rule)
                     .frame(width: lineWidth, height: 10)
             }
             .frame(width: 24)

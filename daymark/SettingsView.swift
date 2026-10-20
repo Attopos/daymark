@@ -18,6 +18,22 @@ struct SettingsView: View {
     @State private var isImporting = false
     @State private var statusMessage: String?
     @State private var errorMessage: String?
+    @State private var isPreparingBackup = false
+    @State private var completedPhotos = 0
+    @State private var totalPhotos = 0
+    @State private var progressMessage = ""
+    @State private var backupTask: Task<Void, Never>?
+    @AppStorage("lastCompleteBackupExport.signedIn") private var signedInExportTimestamp = 0.0
+    @AppStorage("lastCompleteBackupExport.anonymous") private var anonymousExportTimestamp = 0.0
+
+    private var isBusy: Bool { isImporting || isPreparingBackup }
+    private var lastExportTimestamp: Double {
+        get { dataController.scope == .signedIn ? signedInExportTimestamp : anonymousExportTimestamp }
+        nonmutating set {
+            if dataController.scope == .signedIn { signedInExportTimestamp = newValue }
+            else { anonymousExportTimestamp = newValue }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -30,11 +46,23 @@ struct SettingsView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 20)
             }
-            .navigationTitle("Settings")
+            .daymarkScreen()
+            .daymarkNavigationTitle("Settings")
             .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     SignInAvatarButton()
+                }
+            }
+            .onDisappear {
+                backupTask?.cancel()
+                pendingBackup?.cleanUp()
+                pendingBackup = nil
+            }
+            .onChange(of: showingImportOptions) { _, showing in
+                if !showing {
+                    pendingBackup?.cleanUp()
+                    pendingBackup = nil
                 }
             }
             .alert("Backup Error", isPresented: errorAlertBinding) {
@@ -54,11 +82,12 @@ struct SettingsView: View {
                     performImport(mode: .overwrite)
                 }
                 Button("Cancel", role: .cancel) {
+                    pendingBackup?.cleanUp()
                     pendingBackup = nil
                 }
             } message: {
                 if let backup = pendingBackup {
-                    Text("Found \(backup.payload.entries.count) entries. Choose how to handle days that already have a photo.")
+                    Text(importPreview(for: backup))
                 }
             }
             .fileExporter(
@@ -69,22 +98,25 @@ struct SettingsView: View {
             ) { result in
                 switch result {
                 case .success:
-                    statusMessage = "Backup exported."
+                    lastExportTimestamp = Date.now.timeIntervalSince1970
+                    statusMessage = "Complete backup saved. If you chose Google Drive, check Drive for upload completion."
                 case .failure(let error):
                     errorMessage = error.localizedDescription
                 }
+                exportItem?.cleanUp()
                 exportItem = nil
+            } onCancellation: {
+                exportItem?.cleanUp()
+                exportItem = nil
+                statusMessage = "Export cancelled. Your photos are unchanged."
             }
             .fileImporter(
                 isPresented: $showingImporter,
                 allowedContentTypes: [.zip, .json]
             ) { result in
-                do {
-                    let url = try result.get()
-                    pendingBackup = try photoStore.parseBackup(from: url)
-                    showingImportOptions = true
-                } catch {
-                    errorMessage = error.localizedDescription
+                switch result {
+                case .success(let url): prepareImport(from: url)
+                case .failure(let error): errorMessage = error.localizedDescription
                 }
             }
         }
@@ -95,10 +127,11 @@ struct SettingsView: View {
             Image(systemName: "circle.lefthalf.filled")
                 .font(.system(size: 18, weight: .semibold))
                 .frame(width: 40, height: 40)
-                .glassEffect(.regular.interactive(), in: .circle)
+                .background(DaymarkPalette.accent.opacity(0.08), in: Circle())
+                .foregroundStyle(DaymarkPalette.accent)
 
             Text("Theme")
-                .font(.headline)
+                .font(DaymarkTypography.entryTitle)
 
             Spacer()
 
@@ -114,7 +147,7 @@ struct SettingsView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24))
+        .daymarkSurface(cornerRadius: 24)
     }
 
     private var iCloudSyncCard: some View {
@@ -125,20 +158,21 @@ struct SettingsView: View {
                 Image(systemName: "icloud.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .frame(width: 40, height: 40)
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .background(DaymarkPalette.accent.opacity(0.08), in: Circle())
+                    .foregroundStyle(DaymarkPalette.accent)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("iCloud Sync")
-                        .font(.headline)
+                        .font(DaymarkTypography.entryTitle)
 
                     if FileManager.default.ubiquityIdentityToken != nil {
                         Text("Photos sync across your devices")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(DaymarkTypography.metadata)
+                            .foregroundStyle(DaymarkPalette.secondaryInk)
                     } else {
                         Text("Sign in to iCloud to enable sync")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(DaymarkTypography.metadata)
+                            .foregroundStyle(DaymarkPalette.secondaryInk)
                     }
                 }
 
@@ -146,11 +180,11 @@ struct SettingsView: View {
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(DaymarkPalette.secondaryInk.opacity(0.65))
             }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24))
+            .daymarkSurface(cornerRadius: 24)
         }
         .buttonStyle(.plain)
     }
@@ -161,37 +195,60 @@ struct SettingsView: View {
                 Image(systemName: "externaldrive.fill.badge.icloud")
                     .font(.system(size: 18, weight: .semibold))
                     .frame(width: 40, height: 40)
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .background(DaymarkPalette.accent.opacity(0.08), in: Circle())
+                    .foregroundStyle(DaymarkPalette.accent)
 
                 Text("Backup")
-                    .font(.headline)
+                    .font(DaymarkTypography.entryTitle)
 
                 Spacer(minLength: 0)
 
                 Button("Export", action: prepareExport)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(DaymarkPrimaryButtonStyle())
+                    .disabled(isBusy || entries.isEmpty)
 
                 Button("Import") {
                     showingImporter = true
                 }
-                .buttonStyle(.bordered)
-                .disabled(isImporting)
+                .buttonStyle(DaymarkSecondaryButtonStyle())
+                .disabled(isBusy)
             }
 
-            if isImporting {
-                ProgressView("Importing backup…")
+            if isBusy {
+                VStack(alignment: .leading, spacing: 8) {
+                    if totalPhotos > 0 {
+                        ProgressView(value: Double(completedPhotos), total: Double(totalPhotos))
+                    } else {
+                        ProgressView()
+                    }
+                    HStack {
+                        Text(progressMessage).font(.footnote)
+                        Spacer()
+                        Button("Cancel") { backupTask?.cancel() }
+                            .font(.footnote)
+                    }
+                }
+            }
+
+            Text("Export includes original photos, dates, locations and captions. Choose Google Drive in Files to keep an independent copy.")
+                .font(.footnote)
+                .foregroundStyle(DaymarkPalette.secondaryInk)
+
+            if lastExportTimestamp > 0 {
+                Text("Last complete export: \(Date(timeIntervalSince1970: lastExportTimestamp).formatted(date: .abbreviated, time: .shortened))")
                     .font(.footnote)
+                    .foregroundStyle(DaymarkPalette.secondaryInk)
             }
 
             if let statusMessage {
                 Text(statusMessage)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(DaymarkPalette.secondaryInk)
             }
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24))
+        .daymarkSurface(cornerRadius: 24)
     }
 
     private func themeButton(systemName: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
@@ -199,14 +256,18 @@ struct SettingsView: View {
             Image(systemName: systemName)
                 .font(.system(size: 15, weight: .semibold))
                 .frame(width: 34, height: 34)
-                .background(isSelected ? Color.primary.opacity(0.12) : Color.clear, in: Circle())
-                .foregroundStyle(isSelected ? .primary : .secondary)
+                .background(isSelected ? DaymarkPalette.accent.opacity(0.10) : Color.clear, in: Circle())
+                .overlay(Circle().strokeBorder(isSelected ? DaymarkPalette.accent.opacity(0.24) : DaymarkPalette.rule, lineWidth: 0.75))
+                .foregroundStyle(isSelected ? DaymarkPalette.accent : DaymarkPalette.secondaryInk)
         }
         .buttonStyle(.plain)
     }
 
     private var defaultBackupFilename: String {
-        "daymark-backup-\(Date.now.formatted(.iso8601.year().month().day()))"
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        return "daymark-backup-\(formatter.string(from: .now))"
     }
 
     private var errorAlertBinding: Binding<Bool> {
@@ -217,60 +278,95 @@ struct SettingsView: View {
     }
 
     private func prepareExport() {
-        do {
-            exportItem = try photoStore.makeBackupExportItem(from: entries)
-            showingExporter = true
-            statusMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
+        guard !isBusy else { return }
+        isPreparingBackup = true
+        statusMessage = nil
+        totalPhotos = entries.count
+        completedPhotos = 0
+        progressMessage = "Checking existing photos…"
+        let snapshot = entries
+        let canDownload = dataController.isCloudSyncEnabled
+        backupTask = Task {
+            defer { isPreparingBackup = false; backupTask = nil }
+            do {
+                exportItem = try await photoStore.makeBackupExportItem(
+                    from: snapshot, in: modelContext, allowCloudDownload: canDownload
+                ) { completed, total, message in
+                    completedPhotos = completed
+                    totalPhotos = total
+                    progressMessage = message
+                }
+                try Task.checkCancellation()
+                showingExporter = true
+            } catch is CancellationError {
+                exportItem?.cleanUp()
+                exportItem = nil
+                statusMessage = "Export cancelled. Your photos are unchanged."
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
+    }
+
+    private func prepareImport(from url: URL) {
+        guard !isBusy else { return }
+        isImporting = true
+        totalPhotos = 0
+        statusMessage = nil
+        progressMessage = "Reading and verifying backup…"
+        backupTask = Task {
+            defer { isImporting = false; backupTask = nil }
+            let reader = Task.detached(priority: .userInitiated) { try BackupArchiveReader.read(from: url) }
+            do {
+                let contents = try await withTaskCancellationHandler {
+                    try await reader.value
+                } onCancel: { reader.cancel() }
+                if Task.isCancelled { contents.cleanUp(); throw CancellationError() }
+                pendingBackup = contents
+                showingImportOptions = true
+            } catch is CancellationError {
+                statusMessage = "Import cancelled. Your photos are unchanged."
+            } catch { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func importPreview(for backup: BackupContents) -> String {
+        let days = backup.payload.entries.compactMap { try? BackupCalendar.restoredDay($0) }.sorted()
+        let existingDays = Set(entries.map { Calendar.current.startOfDay(for: $0.day) })
+        let conflicts = days.filter { existingDays.contains($0) }.count
+        let range: String
+        if let first = days.first, let last = days.last {
+            range = "\(first.formatted(date: .abbreviated, time: .omitted)) – \(last.formatted(date: .abbreviated, time: .omitted)). "
+        } else { range = "" }
+        return "\(backup.payload.entries.count) photos verified. " + range +
+            "\(conflicts) days already have a photo. Merge skips these days; Overwrite replaces only those days."
     }
 
     private func performImport(mode: BackupImportMode) {
-        guard let backup = pendingBackup else { return }
+        guard let backup = pendingBackup, !isBusy else { return }
         pendingBackup = nil
         isImporting = true
         statusMessage = nil
-
-        Task {
+        totalPhotos = backup.payload.entries.count
+        completedPhotos = 0
+        progressMessage = "Preparing photos for restore…"
+        backupTask = Task {
+            defer { backup.cleanUp(); isImporting = false; backupTask = nil }
             do {
-                try await photoStore.importBackup(
-                    from: backup,
-                    mode: mode,
-                    into: modelContext
-                )
-            } catch {
-                errorMessage = error.localizedDescription
-                isImporting = false
-                return
-            }
-
-            guard dataController.isCloudSyncEnabled else {
-                statusMessage = "Imported \(backup.payload.entries.count) entries. Sign in to back them up to iCloud."
-                isImporting = false
-                return
-            }
-
-            do {
-                let importedEntries = try modelContext.fetch(FetchDescriptor<PhotoEntry>())
-                try await SyncEngine().sync(
-                    entries: importedEntries,
-                    in: modelContext,
-                    includeOriginals: true,
-                    originalLimits: .unlimited
-                )
-                if SyncEngineStatusStore.shared.snapshot.failures.isEmpty {
-                    statusMessage = "Imported \(backup.payload.entries.count) entries and confirmed with iCloud."
-                } else {
-                    statusMessage = "Imported locally, but iCloud sync finished with failures. Keep the backup and retry Sync Now."
+                let summary = try await photoStore.importBackup(from: backup, mode: mode, into: modelContext) { completed, total in
+                    completedPhotos = completed
+                    totalPhotos = total
+                    progressMessage = "Preparing \(completed) of \(total) photos…"
                 }
-            } catch {
-                statusMessage = "Imported locally, but iCloud sync did not finish. Keep the backup and retry Sync Now."
-                errorMessage = error.localizedDescription
-            }
-            isImporting = false
+                statusMessage = "Restored \(summary.imported) photos locally; kept \(summary.skipped) existing days."
+                // Local restore is complete. The existing sync engine handles
+                // optional iCloud sync independently when it next runs.
+            } catch is CancellationError {
+                statusMessage = "Import cancelled. Your photos are unchanged."
+            } catch { errorMessage = error.localizedDescription }
         }
     }
+
 }
 
 #Preview {

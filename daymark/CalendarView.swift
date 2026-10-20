@@ -5,6 +5,7 @@ import UIKit
 
 struct CalendarView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \PhotoEntry.day, order: .reverse) private var entries: [PhotoEntry]
 
     private let photoStore = PhotoStore()
@@ -19,8 +20,13 @@ struct CalendarView: View {
     @State private var pastDaysSelectedDate = Date()
     @State private var pastDaysPhotoItem: PhotosPickerItem?
     @State private var pendingLocationImport: PendingPhotoImport?
+    @State private var gridColumnCount = 3
+    @State private var pinchStartingColumnCount: Int?
+    @ScaledMetric(relativeTo: .headline) private var tileDayFontSize: CGFloat = 16
+    @ScaledMetric(relativeTo: .caption2) private var tileMetadataFontSize: CGFloat = 10
 
     private let calendar = Calendar.current
+    private let gridColumnOptions = [2, 3, 5, 7]
 
     var body: some View {
         NavigationStack {
@@ -41,9 +47,11 @@ struct CalendarView: View {
                                 .padding(.bottom, metrics.bottomPadding)
                         }
                     }
+                    .simultaneousGesture(gridMagnificationGesture)
                 }
             }
-            .navigationTitle("Daymark")
+            .background(DaymarkPalette.paper)
+            .daymarkNavigationTitle("Daymark")
             .toolbarTitleDisplayMode(.inlineLarge)
             .navigationDestination(for: PhotoEntry.self) { entry in
                 PhotoDetailView(entry: entry)
@@ -91,8 +99,10 @@ struct CalendarView: View {
                     .accessibilityLabel("Search Photos")
                 }
             }
+            .daymarkScreen()
         }
-        .task {
+        .task(id: locationBackfillKey) {
+            guard scenePhase == .active else { return }
             await photoStore.backfillLocationDetails(for: entries, in: modelContext)
         }
         .onChange(of: selectedItem) { _, newItem in
@@ -127,10 +137,10 @@ struct CalendarView: View {
                     if selectedDateHasEntry {
                         Text("Pick a date without a daymark.")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(DaymarkPalette.secondaryInk)
                     }
                 }
-                .navigationTitle("Add Daymark")
+                .daymarkNavigationTitle("Add Daymark", inline: true)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -139,6 +149,7 @@ struct CalendarView: View {
                         }
                     }
                 }
+                .daymarkScreen()
             }
         }
         .sheet(item: $pendingLocationImport, onDismiss: {
@@ -187,7 +198,7 @@ struct CalendarView: View {
                 Spacer()
 
                 Text(displayedMonth.formatted(.dateTime.year()))
-                    .font(.headline)
+                    .font(DaymarkTypography.sectionTitle)
 
                 Spacer()
 
@@ -215,7 +226,7 @@ struct CalendarView: View {
                 Spacer()
 
                 Text(displayedMonth.formatted(.dateTime.month(.wide)))
-                    .font(.headline)
+                    .font(DaymarkTypography.sectionTitle)
 
                 Spacer()
 
@@ -237,8 +248,8 @@ struct CalendarView: View {
             LazyVGrid(columns: columns, spacing: 12) {
                 ForEach(symbols, id: \.self) { symbol in
                     Text(symbol)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(DaymarkPalette.secondaryInk)
                         .frame(maxWidth: .infinity)
                 }
 
@@ -254,19 +265,19 @@ struct CalendarView: View {
                             ZStack {
                                 if hasEntry {
                                     Rectangle()
-                                        .fill((isSelected ? Color.white : Color.primary).opacity(isSelected ? 0.95 : 0.75))
+                                        .fill((isSelected ? Color.white : DaymarkPalette.ink).opacity(isSelected ? 0.95 : 0.75))
                                         .frame(width: 24, height: 2.5)
                                         .rotationEffect(.degrees(-18))
                                 }
 
                                 Text(dayNumberText(for: date))
-                                    .font(.body.weight(isSelected ? .bold : .regular))
+                                    .font(.system(.body, design: .serif, weight: isSelected ? .semibold : .regular))
                                     .foregroundStyle(dayForegroundStyle(isSelected: isSelected, isToday: isToday, hasEntry: hasEntry))
                             }
                             .frame(maxWidth: .infinity, minHeight: 36)
                             .background {
                                 Circle()
-                                    .fill(isSelected ? Color.accentColor : .clear)
+                                    .fill(isSelected ? DaymarkPalette.accent : .clear)
                             }
                         }
                         .buttonStyle(.plain)
@@ -304,7 +315,7 @@ struct CalendarView: View {
                     }
                 } header: {
                     Text(month.formatted(.dateTime.month(.wide).year()))
-                        .font(.title3.bold())
+                        .font(DaymarkTypography.sectionTitle)
                         .padding(.top, 8)
                 }
             }
@@ -313,8 +324,8 @@ struct CalendarView: View {
 
     private func gapTile(id: String, size: CGFloat) -> some View {
         Text("...")
-            .font(.system(size: 24, weight: .bold, design: .rounded))
-            .foregroundStyle(.secondary)
+            .font(.system(.title2, design: .serif, weight: .medium))
+            .foregroundStyle(DaymarkPalette.secondaryInk)
             .frame(width: size, height: size)
             .accessibilityLabel("More daymarks between visible dates")
             .id(id)
@@ -348,25 +359,32 @@ struct CalendarView: View {
     }
 
     private func addMarkTile(size: CGFloat) -> some View {
-        PhotosPicker(selection: $selectedItem, matching: .images) {
+        let overlayScale = min(size / 120, 1)
+
+        return PhotosPicker(selection: $selectedItem, matching: .images) {
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
+                    .fill(DaymarkPalette.recessed)
 
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
-                    .foregroundStyle(Color.primary.opacity(0.18))
+                    .strokeBorder(style: StrokeStyle(lineWidth: 0.75, dash: [4, 4]))
+                    .foregroundStyle(DaymarkPalette.accent.opacity(0.25))
 
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .top, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 1) {
+                    HStack(alignment: .top, spacing: 8 * overlayScale) {
+                        VStack(alignment: .leading, spacing: overlayScale) {
                             Text("Today")
-                                .font(.system(size: 16, weight: .bold, design: .rounded))
-                                .foregroundStyle(.primary)
+                                .font(.system(size: tileDayFontSize * overlayScale, weight: .semibold, design: .serif))
+                                .foregroundStyle(DaymarkPalette.ink)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
+                                .allowsTightening(true)
 
                             Text("Create mark")
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.secondary)
+                                .font(.system(size: tileMetadataFontSize * overlayScale, weight: .medium))
+                                .foregroundStyle(DaymarkPalette.secondaryInk)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
                         }
 
                         Spacer(minLength: 0)
@@ -375,11 +393,11 @@ struct CalendarView: View {
                     Spacer(minLength: 0)
 
                     Image(systemName: "plus")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(.primary.opacity(0.8))
+                        .font(.system(size: 24 * overlayScale, weight: .regular))
+                        .foregroundStyle(DaymarkPalette.accent)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 }
-                .padding(8)
+                .padding(8 * overlayScale)
             }
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
@@ -444,7 +462,7 @@ struct CalendarView: View {
                     }
                 } header: {
                     Text(month.formatted(.dateTime.month(.wide).year()))
-                        .font(.title3.bold())
+                        .font(DaymarkTypography.sectionTitle)
                         .padding(.top, 8)
                 }
             }
@@ -458,7 +476,9 @@ struct CalendarView: View {
     }
 
     private func emptyDayTile(date: Date, size: CGFloat) -> some View {
-        PhotosPicker(selection: Binding(
+        let overlayScale = min(size / 120, 1)
+
+        return PhotosPicker(selection: Binding(
             get: { pastDaysPhotoItem },
             set: { newItem in
                 pastDaysSelectedDate = date
@@ -467,33 +487,38 @@ struct CalendarView: View {
         ), matching: .images) {
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
+                    .fill(DaymarkPalette.recessed)
 
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
-                    .foregroundStyle(Color.primary.opacity(0.18))
+                    .strokeBorder(style: StrokeStyle(lineWidth: 0.75, dash: [4, 4]))
+                    .foregroundStyle(DaymarkPalette.accent.opacity(0.25))
 
                 VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 1) {
+                    VStack(alignment: .leading, spacing: overlayScale) {
                         Text(dayLabel(for: date))
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundStyle(.primary)
+                            .font(.system(size: tileDayFontSize * overlayScale, weight: .semibold, design: .serif))
+                            .foregroundStyle(DaymarkPalette.ink)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
+                            .allowsTightening(true)
 
                         Text(monthLabel(for: date))
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: tileMetadataFontSize * overlayScale, weight: .medium))
+                            .foregroundStyle(DaymarkPalette.secondaryInk)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
                     }
 
                     Spacer(minLength: 0)
 
                     Image(systemName: "plus")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 20 * overlayScale, weight: .medium))
+                        .foregroundStyle(DaymarkPalette.accent)
                         .frame(maxWidth: .infinity, alignment: .center)
 
                     Spacer(minLength: 0)
                 }
-                .padding(8)
+                .padding(8 * overlayScale)
             }
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
@@ -541,8 +566,39 @@ struct CalendarView: View {
         calendar.isDate(displayedMonth, equalTo: Date(), toGranularity: .year)
     }
 
+    // New imports/cloud arrivals and returning to the app retry missing locations.
+    // Exclude resolved names/codes so repairs do not restart their own task.
+    private var locationBackfillKey: String {
+        "\(scenePhase)-" + entries.map {
+            "\($0.id):\($0.latitude?.description ?? ""):\($0.longitude?.description ?? "")"
+        }.sorted().joined(separator: "|")
+    }
+
     private func columns(for metrics: LayoutMetrics) -> [GridItem] {
-        Array(repeating: GridItem(.fixed(metrics.cellSize), spacing: metrics.gridSpacing), count: 3)
+        Array(repeating: GridItem(.fixed(metrics.cellSize), spacing: metrics.gridSpacing), count: gridColumnCount)
+    }
+
+    private var gridMagnificationGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let startingCount = pinchStartingColumnCount ?? gridColumnCount
+                if pinchStartingColumnCount == nil {
+                    pinchStartingColumnCount = startingCount
+                }
+
+                let desiredCount = Double(startingCount) / max(Double(value.magnification), 0.1)
+                let nearestCount = gridColumnOptions.min { lhs, rhs in
+                    abs(log(Double(lhs) / desiredCount)) < abs(log(Double(rhs) / desiredCount))
+                } ?? startingCount
+
+                guard nearestCount != gridColumnCount else { return }
+                withAnimation(.snappy(duration: 0.18)) {
+                    gridColumnCount = nearestCount
+                }
+            }
+            .onEnded { _ in
+                pinchStartingColumnCount = nil
+            }
     }
 
     private func layoutMetrics(for width: CGFloat, safeAreaInsets: EdgeInsets) -> LayoutMetrics {
@@ -551,8 +607,9 @@ struct CalendarView: View {
         let topPadding = 10.0
         let bottomPadding = max(safeAreaInsets.bottom + 20, 28)
         let safeWidth = width.isFinite ? max(width, 0) : 0
-        let availableWidth = max(safeWidth - (horizontalPadding * 2) - (gridSpacing * 2), 0)
-        let cellSize = max(floor(availableWidth / 3), 0)
+        let totalGridSpacing = gridSpacing * Double(max(gridColumnCount - 1, 0))
+        let availableWidth = max(safeWidth - (horizontalPadding * 2) - totalGridSpacing, 0)
+        let cellSize = max(floor(availableWidth / Double(gridColumnCount)), 0)
 
         return LayoutMetrics(
             horizontalPadding: horizontalPadding,
@@ -655,10 +712,10 @@ struct CalendarView: View {
         }
 
         if hasEntry {
-            return .primary.opacity(0.55)
+            return DaymarkPalette.secondaryInk
         }
 
-        return isToday ? .accentColor : .primary
+        return isToday ? DaymarkPalette.accent : DaymarkPalette.ink
     }
 }
 
@@ -707,6 +764,22 @@ struct MarkCard: View {
     let subtitleText: String?
     let flagEmoji: String?
     let size: CGFloat
+    @ScaledMetric(relativeTo: .headline) private var dayFontSize: CGFloat = 16
+    @ScaledMetric(relativeTo: .caption2) private var metadataFontSize: CGFloat = 10
+
+    private var overlayScale: CGFloat {
+        min(size / 120, 1)
+    }
+
+    private var accessibilityDescription: String {
+        [
+            entry.day.formatted(.dateTime.weekday(.wide).month(.wide).day().year()),
+            subtitleText,
+            flagEmoji
+        ]
+        .compactMap { $0 }
+        .joined(separator: ", ")
+    }
 
     var body: some View {
         if size > 0 {
@@ -714,14 +787,14 @@ struct MarkCard: View {
                 EntryThumbnail(entry: entry) {
                     ZStack {
                         LinearGradient(
-                            colors: [Color(.secondarySystemBackground), Color(.systemGray6)],
+                            colors: [DaymarkPalette.paper, DaymarkPalette.recessed],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
 
                         Image(systemName: "photo")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 20 * overlayScale, weight: .medium))
+                            .foregroundStyle(DaymarkPalette.secondaryInk)
                     }
                 }
                 .frame(width: size, height: size)
@@ -735,16 +808,22 @@ struct MarkCard: View {
                 .frame(width: size, height: size)
 
                 VStack(spacing: 0) {
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 1) {
+                    HStack(alignment: .top, spacing: 8 * overlayScale) {
+                        VStack(alignment: .leading, spacing: overlayScale) {
                             Text(dayText)
-                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .font(.system(size: dayFontSize * overlayScale, weight: .semibold, design: .serif))
                                 .foregroundStyle(.white)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
+                                .allowsTightening(true)
 
                             if let subtitleText {
                                 Text(subtitleText)
-                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .font(.system(size: metadataFontSize * overlayScale, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.88))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.5)
+                                    .allowsTightening(true)
                             }
                         }
 
@@ -752,19 +831,22 @@ struct MarkCard: View {
 
                         if let flagEmoji {
                             Text(flagEmoji)
-                                .font(.system(size: 14))
-                                .frame(width: 28, height: 28)
-                                .background(.white, in: Circle())
+                                .font(.system(size: 14 * overlayScale))
+                                .frame(width: 28 * overlayScale, height: 28 * overlayScale)
+                                .background(DaymarkPalette.photoMount, in: Circle())
+                                .fixedSize()
                         }
                     }
 
                     Spacer(minLength: 0)
                 }
-                .padding(8)
+                .padding(8 * overlayScale)
             }
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityDescription)
         }
     }
 }

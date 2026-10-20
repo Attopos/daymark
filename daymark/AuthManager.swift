@@ -89,8 +89,9 @@ final class AuthManager: NSObject {
     }
 
     func checkCredentialState() async {
+        // Anonymous launches have no Apple credential to validate. Let the
+        // existing Sign in with Apple buttons initiate a new authorization.
         guard let userID = UserDefaults.standard.string(forKey: userIDKey) else {
-            await attemptExistingAccountSignIn()
             return
         }
         do {

@@ -163,7 +163,7 @@ final class daymarkTests: XCTestCase {
         context.insert(viewing)
         try context.save()
 
-        let removed = try PhotoStore().consolidateDuplicateDays(
+        let removed = try PhotoStore(flushPendingDeletions: {}).consolidateDuplicateDays(
             for: [metadataOnly, thumbnail, viewing],
             in: context
         )
@@ -197,7 +197,8 @@ final class daymarkTests: XCTestCase {
         let store = PhotoStore(
             originalsDirectoryURL: directoryURL,
             thumbnailsDirectoryURL: thumbnailDirectoryURL,
-            viewPhotosDirectoryURL: viewPhotoDirectoryURL
+            viewPhotosDirectoryURL: viewPhotoDirectoryURL,
+            flushPendingDeletions: {}
         )
         let imageData = try makeJPEGData()
 

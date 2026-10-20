@@ -15,16 +15,16 @@ struct WelcomeView: View {
 
             Image(systemName: "book.closed.fill")
                 .font(.system(size: 64))
-                .foregroundStyle(.blue.gradient)
+                .foregroundStyle(DaymarkPalette.accent)
 
             VStack(spacing: 10) {
                 Text("Welcome to Daymark")
-                    .font(.largeTitle.weight(.bold))
+                    .font(DaymarkTypography.pageTitle)
                     .multilineTextAlignment(.center)
 
                 Text("Capture one photo a day and build a journal of your year.")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(DaymarkPalette.secondaryInk)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
             }
@@ -51,17 +51,21 @@ struct WelcomeView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
+                .foregroundStyle(DaymarkPalette.accent)
+                .background(DaymarkPalette.surface, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(DaymarkPalette.rule, lineWidth: 0.75))
 
                 Text("You can sign in later from Settings. Signing in lets you personalize Daymark across your devices.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(DaymarkTypography.metadata)
+                    .foregroundStyle(DaymarkPalette.secondaryInk)
                     .multilineTextAlignment(.center)
                     .padding(.top, 4)
             }
             .padding(.horizontal, 32)
             .padding(.bottom, 32)
         }
+        .daymarkScreen()
         .interactiveDismissDisabled()
     }
 }

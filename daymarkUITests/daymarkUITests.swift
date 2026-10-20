@@ -12,6 +12,36 @@ final class daymarkUITests: XCTestCase {
     }
 
     @MainActor
+    func testExistingNavigationAndBackupControls() throws {
+        for darkMode in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-hasCompletedWelcome", "YES", "-prefersDarkMode", darkMode ? "YES" : "NO"]
+            app.launch()
+            for title in ["Calendar", "Maps", "Timeline", "Settings"] {
+                XCTAssertTrue(app.tabBars.buttons[title].waitForExistence(timeout: 10), title)
+            }
+            for title in ["Calendar", "Timeline"] {
+                app.tabBars.buttons[title].tap()
+                let heading = title == "Calendar" ? "Daymark" : title
+                XCTAssertTrue(app.navigationBars[heading].waitForExistence(timeout: 5))
+                let attachment = XCTAttachment(screenshot: app.screenshot())
+                attachment.name = "\(title) \(darkMode ? "dark" : "light")"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+            app.tabBars.buttons["Settings"].tap()
+            XCTAssertTrue(app.buttons["Import"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["Export"].exists)
+            XCTAssertTrue(app.staticTexts["Backup"].exists)
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = darkMode ? "Settings dark" : "Settings light"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         measure(metrics: [XCTApplicationLaunchMetric()]) {
             XCUIApplication().launch()

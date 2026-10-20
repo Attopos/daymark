@@ -31,15 +31,16 @@ struct SignInAvatarButton: View {
             if authManager.isSignedIn, let initials = authManager.userInitials {
                 Text(initials)
                     .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(DaymarkPalette.buttonText)
                     .frame(width: 40, height: 40)
-                    .background(.blue.gradient, in: Circle())
+                    .background(DaymarkPalette.buttonFill, in: Circle())
             } else {
                 Image(systemName: "person.crop.circle.fill")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(DaymarkPalette.accent)
                     .frame(width: 40, height: 40)
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .background(DaymarkPalette.accent.opacity(0.08), in: Circle())
+                    .overlay(Circle().strokeBorder(DaymarkPalette.rule, lineWidth: 0.75))
             }
         }
     }
@@ -66,12 +67,12 @@ private struct ProfileView: View {
 
                     VStack(spacing: 4) {
                         Text(authManager.displayName)
-                            .font(.title2.weight(.bold))
+                            .font(DaymarkTypography.sectionTitle)
 
                         if let email = authManager.userEmail {
                             Text(email)
                                 .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(DaymarkPalette.secondaryInk)
                         }
                     }
                 }
@@ -110,15 +111,16 @@ private struct ProfileView: View {
                     .disabled(isDeleting)
 
                     Text("Deleting your account signs you out and permanently removes all of your journal photos and data from this device and iCloud.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(DaymarkTypography.metadata)
+                        .foregroundStyle(DaymarkPalette.secondaryInk)
                         .multilineTextAlignment(.center)
                         .padding(.top, 4)
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)
             }
-            .navigationTitle("Profile")
+            .daymarkScreen()
+            .daymarkNavigationTitle("Profile", inline: true)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -152,13 +154,13 @@ private struct ProfileView: View {
             if let initials = authManager.userInitials {
                 Text(initials)
                     .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(DaymarkPalette.buttonText)
                     .frame(width: 96, height: 96)
-                    .background(.blue.gradient, in: Circle())
+                    .background(DaymarkPalette.buttonFill, in: Circle())
             } else {
                 Image(systemName: "person.crop.circle.fill")
                     .font(.system(size: 96))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(DaymarkPalette.secondaryInk)
             }
         }
     }
@@ -201,14 +203,14 @@ struct SignInSheet: View {
 
             Image(systemName: "person.crop.circle.badge.checkmark")
                 .font(.system(size: 60))
-                .foregroundStyle(.blue)
+                .foregroundStyle(DaymarkPalette.accent)
 
             Text("Sign in to Daymark")
-                .font(.title2.weight(.bold))
+                .font(DaymarkTypography.sectionTitle)
 
             Text("Sign in with your Apple account to personalize your experience.")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(DaymarkPalette.secondaryInk)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
 
@@ -227,8 +229,9 @@ struct SignInSheet: View {
             Spacer()
 
             Button("Not Now") { dismiss() }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(DaymarkPalette.secondaryInk)
                 .padding(.bottom, 20)
         }
+        .daymarkScreen()
     }
 }

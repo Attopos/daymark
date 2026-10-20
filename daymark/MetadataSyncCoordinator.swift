@@ -210,6 +210,19 @@ struct MetadataSyncCoordinator {
         return summary
     }
 
+    static func recordRestoredMetadata(for entry: PhotoEntry, at date: Date = .now) throws {
+        // Explicit restore is a new local revision of every field, including
+        // fields that already match this device's old sync baseline.
+        let snapshot = MetadataSnapshot(entry: entry)
+        let version = MetadataFieldVersion(modifiedAt: date, deviceID: SyncDeviceIdentity.current)
+        let versions = Dictionary(uniqueKeysWithValues: VersionedMetadata.fieldNames.map { ($0, version) })
+        let encoder = JSONEncoder()
+        let versionData = try encoder.encode(VersionedMetadata(snapshot: snapshot, versions: versions))
+        let baselineData = try encoder.encode(snapshot)
+        entry.metadataVersionData = versionData
+        entry.metadataBaselineData = baselineData
+    }
+
     func captureLocalChanges(for entry: PhotoEntry, at date: Date = .now) -> VersionedMetadata {
         let current = MetadataSnapshot(entry: entry)
         let baseline = decodeSnapshot(entry.metadataBaselineData)

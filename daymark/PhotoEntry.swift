@@ -113,8 +113,8 @@ final class PhotoEntry {
     }
 
     var flagEmoji: String? {
-        guard let countryCode, countryCode.count == 2 else { return nil }
-        let scalars = countryCode.uppercased().unicodeScalars.compactMap {
+        guard let countryCode = LocationGeocoder.normalizedCountryCode(countryCode) else { return nil }
+        let scalars = countryCode.unicodeScalars.compactMap {
             UnicodeScalar(127397 + $0.value)
         }
         guard scalars.count == 2 else { return nil }

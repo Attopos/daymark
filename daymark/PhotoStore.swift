@@ -13,10 +13,11 @@ enum BackupImportMode {
     case overwrite
 }
 
-struct BackupContents {
+nonisolated struct BackupContents: Sendable {
     let payload: DaymarkBackupPayload
     fileprivate let archiveData: Data?
     fileprivate let imageRanges: [String: Range<Int>]
+    var workingDirectory: URL? = nil
 
     init(
         payload: DaymarkBackupPayload,
@@ -29,21 +30,42 @@ struct BackupContents {
     }
 
     func imageData(named filename: String) -> Data? {
+        if let workingDirectory, BackupArchiveReader.isSafeFilename(filename) {
+            return try? Data(contentsOf: workingDirectory.appendingPathComponent("images").appendingPathComponent(filename), options: .mappedIfSafe)
+        }
         guard let archiveData, let range = imageRanges[filename] else { return nil }
         return archiveData.subdata(in: range)
     }
+
+    func cleanUp() {
+        if let workingDirectory { try? FileManager.default.removeItem(at: workingDirectory) }
+    }
 }
 
-enum BackupError: LocalizedError {
+nonisolated enum BackupError: LocalizedError {
     case invalidArchive
     case missingEntriesJSON
     case invalidEntriesJSON
+    case unsupportedVersion(Int)
+    case missingOriginal(String)
+    case damagedPhoto(String)
+    case duplicateDay
+    case libraryChanged
+    case insufficientSpace
+    case unresolvedConflict(String)
 
     var errorDescription: String? {
         switch self {
         case .invalidArchive: return "The file is not a valid backup archive."
         case .missingEntriesJSON: return "The archive does not contain entries.json."
         case .invalidEntriesJSON: return "Could not read backup metadata."
+        case .unsupportedVersion(let version): return "Backup version \(version) is not supported. Update Daymark before importing it."
+        case .missingOriginal(let day): return "The original photo for \(day) is unavailable. Connect to iCloud and retry. No incomplete backup was exported."
+        case .damagedPhoto(let name): return "The photo \(name) is missing or failed verification. Your library has not been replaced."
+        case .duplicateDay: return "More than one record has the same day. Resolve the duplicate days before continuing."
+        case .libraryChanged: return "The library changed during this operation. Please retry."
+        case .insufficientSpace: return "There is not enough free space to prepare this backup. Free up storage and retry."
+        case .unresolvedConflict(let day): return "Resolve the original-photo conflict for \(day) in iCloud Sync before exporting."
         }
     }
 }
@@ -65,6 +87,8 @@ struct PhotoStore {
     private let thumbnailFileStore: ThumbnailPhotoFileStore
     private let viewPhotoFileStore: ViewPhotoFileStore
     private let conflictPhotoFileStore: ConflictPhotoFileStore
+    private let legacyDirectoryOverride: URL?
+    private let flushPendingDeletions: @Sendable () async -> Void
     private let exifDateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -86,12 +110,18 @@ struct PhotoStore {
         originalsDirectoryURL: URL? = nil,
         thumbnailsDirectoryURL: URL? = nil,
         viewPhotosDirectoryURL: URL? = nil,
-        conflictPhotosDirectoryURL: URL? = nil
+        conflictPhotosDirectoryURL: URL? = nil,
+        legacyPhotosDirectoryURL: URL? = nil,
+        flushPendingDeletions: @escaping @Sendable () async -> Void = {
+            await SyncDeletionCoordinator().flush()
+        }
     ) {
         originalFileStore = OriginalPhotoFileStore(directoryURL: originalsDirectoryURL)
         thumbnailFileStore = ThumbnailPhotoFileStore(directoryURL: thumbnailsDirectoryURL)
         viewPhotoFileStore = ViewPhotoFileStore(directoryURL: viewPhotosDirectoryURL)
         conflictPhotoFileStore = ConflictPhotoFileStore(directoryURL: conflictPhotosDirectoryURL)
+        legacyDirectoryOverride = legacyPhotosDirectoryURL
+        self.flushPendingDeletions = flushPendingDeletions
     }
 
     private func normalizedDay(for date: Date) -> Date {
@@ -136,7 +166,12 @@ struct PhotoStore {
            let data = try? originalFileStore.read(filename: filename) {
             return data
         }
-        return entry.imageData
+        if let data = entry.imageData { return data }
+        if let filename = entry.imageFilename,
+           BackupArchiveReader.isSafeFilename(filename) {
+            return try? Data(contentsOf: legacyFileURL(filename: filename), options: .mappedIfSafe)
+        }
+        return nil
     }
 
     func conflictOriginalData(for entry: PhotoEntry) -> Data? {
@@ -206,33 +241,92 @@ struct PhotoStore {
         invalidateCaches(for: entry)
     }
 
-    func makeBackupExportItem(from entries: [PhotoEntry]) throws -> DaymarkBackupExportItem {
-        let backupEntries = entries.map { entry in
-            DaymarkBackupEntry(
-                id: entry.id,
-                day: entry.day,
-                captureDate: entry.captureDate,
-                imageFilename: originalData(for: entry) != nil ? "\(entry.id).jpg" : nil,
-                latitude: entry.latitude,
-                longitude: entry.longitude,
-                timezone: entry.timezone,
-                countryCode: entry.countryCode,
-                countryName: entry.countryName,
-                city: entry.city,
-                caption: entry.caption
-            )
+    /// Reads all historical storage forms directly; exporting never depends on
+    /// the launch migration having finished and never uploads to iCloud.
+    func makeBackupExportItem(
+        from entries: [PhotoEntry],
+        in modelContext: ModelContext,
+        allowCloudDownload: Bool,
+        remoteStore: (any OriginalPhotoRemoteStore)? = nil,
+        progress: @escaping (Int, Int, String) -> Void = { _, _, _ in }
+    ) async throws -> DaymarkBackupExportItem {
+        try modelContext.save()
+        let snapshots = entries.map(backupEntry)
+        var sourceRevisions = entries.map(originalRevision)
+        try BackupArchiveReader.validateMetadata(DaymarkBackupPayload(version: 3, exportedAt: .now, entries: snapshots))
+        let writer = try BackupArchiveWriter()
+        var cloud = remoteStore
+        var inventory: [String: RemoteOriginalPhoto]?
+        var exportedEntries: [DaymarkBackupEntry] = []
+        do {
+            for (index, entry) in entries.enumerated() {
+                try Task.checkCancellation()
+                guard entry.modelContext != nil, !entry.isDeleted,
+                      backupEntry(entry) == snapshots[index], originalRevision(entry) == sourceRevisions[index] else { throw BackupError.libraryChanged }
+                let day = snapshots[index].dayKey ?? entry.day.formatted(date: .abbreviated, time: .omitted)
+                if entry.originalSyncState == .conflict {
+                    throw BackupError.unresolvedConflict(day)
+                }
+                progress(index, entries.count, "Preparing \(index + 1) of \(entries.count)…")
+                var data = originalData(for: entry)
+                if data == nil && allowCloudDownload {
+                    progress(index, entries.count, "Downloading original for \(day) from iCloud…")
+                    if cloud == nil { cloud = CloudKitOriginalPhotoStore() }
+                    if inventory == nil { inventory = try await cloud?.inventory() }
+                    if let remote = inventory?[entry.id], let cloud {
+                        if let expectedHash = entry.originalContentHash, expectedHash != remote.contentHash {
+                            throw BackupError.unresolvedConflict(day)
+                        }
+                        let downloaded = try await cloud.download(entryID: entry.id)
+                        try Task.checkCancellation()
+                        guard entry.modelContext != nil, !entry.isDeleted,
+                              backupEntry(entry) == snapshots[index], originalRevision(entry) == sourceRevisions[index], originalData(for: entry) == nil else {
+                            throw BackupError.libraryChanged
+                        }
+                        guard BackupArchiveReader.hash(downloaded) == remote.contentHash,
+                              Int64(downloaded.count) == remote.byteCount else {
+                            throw BackupError.damagedPhoto(day)
+                        }
+                        try storeDownloadedOriginal(downloaded, for: entry)
+                        entry.originalLastSyncedHash = remote.contentHash
+                        entry.originalSyncState = .synced
+                        try modelContext.save()
+                        data = downloaded
+                        sourceRevisions[index] = originalRevision(entry)
+                    }
+                }
+                guard let data else { throw BackupError.missingOriginal(day) }
+                var metadata = snapshots[index]
+                metadata = try await writer.addPhoto(data, metadata: metadata, index: index)
+                if let expected = entry.originalContentHash, expected != metadata.imageSHA256 {
+                    throw BackupError.damagedPhoto(day)
+                }
+                exportedEntries.append(metadata)
+                progress(index + 1, entries.count, "Prepared \(index + 1) of \(entries.count) photos")
+            }
+            try Task.checkCancellation()
+            let currentEntries = try modelContext.fetch(FetchDescriptor<PhotoEntry>())
+            guard Set(currentEntries.map(\.id)) == Set(entries.map(\.id)),
+                  entries.enumerated().allSatisfy({ !$0.element.isDeleted && backupEntry($0.element) == snapshots[$0.offset] && originalRevision($0.element) == sourceRevisions[$0.offset] }) else {
+                throw BackupError.libraryChanged
+            }
+            progress(entries.count, entries.count, "Verifying backup…")
+            let result = try await writer.finish(entries: exportedEntries)
+            return DaymarkBackupExportItem(url: result.url, entryCount: entries.count, byteCount: result.byteCount)
+        } catch {
+            await writer.cancel()
+            throw error
         }
+    }
 
-        let payload = DaymarkBackupPayload(version: 2, exportedAt: Date(), entries: backupEntries)
-        let jsonData = try encodedBackupData(for: payload)
-
-        var zipEntries = [ZipArchive.Entry(path: "entries.json", data: jsonData)]
-        for entry in entries {
-            guard let imageData = originalData(for: entry) else { continue }
-            zipEntries.append(ZipArchive.Entry(path: "images/\(entry.id).jpg", data: imageData))
-        }
-
-        return DaymarkBackupExportItem(data: ZipArchive.create(entries: zipEntries))
+    private func backupEntry(_ entry: PhotoEntry) -> DaymarkBackupEntry {
+        var snapshot = DaymarkBackupEntry(
+            id: entry.id, day: entry.day, captureDate: entry.captureDate, imageFilename: nil,
+            latitude: entry.latitude, longitude: entry.longitude, timezone: entry.timezone,
+            countryCode: entry.countryCode, countryName: entry.countryName, city: entry.city, caption: entry.caption
+        )
+        snapshot.dayKey = BackupCalendar.dayKey(for: entry.day)
+        return snapshot
     }
 
     func hasEmbeddedLocation(in data: Data) -> Bool {
@@ -470,8 +564,8 @@ struct PhotoStore {
         try? thumbnailFileStore.remove(filename: thumbnailFilename)
         try? viewPhotoFileStore.remove(filename: viewPhotoFilename)
         try? conflictPhotoFileStore.remove(filename: conflictPhotoFilename)
-        Task.detached(priority: .utility) {
-            await SyncDeletionCoordinator().flush()
+        Task.detached(priority: .utility) { [flushPendingDeletions] in
+            await flushPendingDeletions()
         }
     }
 
@@ -537,183 +631,163 @@ struct PhotoStore {
             try? conflictPhotoFileStore.remove(filename: filename)
         }
 
-        Task.detached(priority: .utility) {
-            await SyncDeletionCoordinator().flush()
+        Task.detached(priority: .utility) { [flushPendingDeletions] in
+            await flushPendingDeletions()
         }
     }
 
     func parseBackup(from url: URL) throws -> BackupContents {
-        let didAccessSecurityScope = url.startAccessingSecurityScopedResource()
-        defer {
-            if didAccessSecurityScope {
-                url.stopAccessingSecurityScopedResource()
-            }
-        }
-
-        let data = try Data(contentsOf: url, options: .mappedIfSafe)
-
-        if data.count >= 2 && data[data.startIndex] == 0x50 && data[data.startIndex + 1] == 0x4B {
-            let zipEntries = try ZipArchive.index(from: data)
-
-            guard let jsonEntry = zipEntries.first(where: { $0.path == "entries.json" }) else {
-                throw BackupError.missingEntriesJSON
-            }
-
-            let payload: DaymarkBackupPayload
-            do {
-                payload = try decodedBackupPayload(from: data.subdata(in: jsonEntry.dataRange))
-            } catch {
-                throw BackupError.invalidEntriesJSON
-            }
-
-            var imageRanges: [String: Range<Int>] = [:]
-            for entry in zipEntries where entry.path.hasPrefix("images/") {
-                let filename = String(entry.path.dropFirst("images/".count))
-                guard !filename.isEmpty else { continue }
-                imageRanges[filename] = entry.dataRange
-            }
-
-            return BackupContents(
-                payload: payload,
-                archiveData: data,
-                imageRanges: imageRanges
-            )
-        }
-
-        let payload: DaymarkBackupPayload
-        do {
-            payload = try decodedBackupPayload(from: data)
-        } catch {
-            throw BackupError.invalidEntriesJSON
-        }
-        return BackupContents(payload: payload)
+        try BackupArchiveReader.read(from: url)
     }
 
+    @discardableResult
     func importBackup(
         from contents: BackupContents,
         mode: BackupImportMode,
-        into modelContext: ModelContext
-    ) async throws {
-        var replacedOriginalFilenames: [String] = []
-
+        into modelContext: ModelContext,
+        progress: @escaping (Int, Int) -> Void = { _, _ in }
+    ) async throws -> BackupImportSummary {
+        try BackupArchiveReader.validateMetadata(contents.payload)
+        try modelContext.save()
+        let initialEntries = try modelContext.fetch(FetchDescriptor<PhotoEntry>())
+        let initialMetadata = initialEntries.map(backupEntry)
+        let initialSources = initialEntries.map(originalRevision)
+        var byDay: [Date: PhotoEntry] = [:]
+        for entry in initialEntries { byDay[normalizedDay(for: entry.day)] = entry }
+        // An old identity can still be targeted by an in-flight cloud delete.
+        // Give a newly restored entry a fresh identity until that delete ends.
+        var usedIDs = Set(initialEntries.map(\.id)).union(PendingSyncDeletionStore.pendingEntryIDs())
+        let oldOriginals = Set(initialEntries.compactMap(\.localOriginalFilename))
+        let oldThumbnails = Set(initialEntries.compactMap(\.localThumbnailFilename))
+        let oldViews = Set(initialEntries.compactMap(\.localViewPhotoFilename))
+        var newOriginals = Set<String>(), newThumbnails = Set<String>(), newViews = Set<String>()
+        var replacedOriginals = Set<String>(), replacedThumbnails = Set<String>(), replacedViews = Set<String>()
+        struct PreparedPhoto {
+            let metadata: DaymarkBackupEntry
+            let day: Date
+            let id: String
+            let existing: PhotoEntry?
+            let original: StoredOriginalPhoto
+            let thumbnail: StoredThumbnailPhoto
+            let view: StoredViewPhoto
+        }
+        var prepared: [PreparedPhoto] = []
+        var skipped = 0
+        var didStartApplying = false
+        let autosave = modelContext.autosaveEnabled
+        defer { modelContext.autosaveEnabled = autosave }
         do {
-            for (index, backupEntry) in contents.payload.entries.enumerated() {
-                let normalizedDate = normalizedDay(for: backupEntry.day)
-                let existing = try existingEntry(for: normalizedDate, in: modelContext)
-
+            // Generate and validate every asset before replacing any library entry.
+            for (index, metadata) in contents.payload.entries.enumerated() {
+                try Task.checkCancellation()
+                let day = try BackupCalendar.restoredDay(metadata)
+                let existing = byDay[day]
                 if mode == .merge && existing != nil {
+                    skipped += 1
+                    progress(index + 1, contents.payload.entries.count)
                     continue
                 }
-
-                let entry = existing ?? PhotoEntry(day: normalizedDate)
-                if entry.modelContext == nil {
-                    modelContext.insert(entry)
-                }
-
-                if let backupID = backupEntry.id, entry.id != backupID {
-                    // Reusing an existing entry but adopting the backup's ID
-                    // orphans the old ID's cloud records; tombstone it so they
-                    // are removed and not resurrected as a duplicate.
-                    if existing != nil {
-                        PendingSyncDeletionStore.add(entryID: entry.id)
+                let id: String
+                if let existing { id = existing.id }
+                else if let backupID = metadata.id, !usedIDs.contains(backupID) { id = backupID }
+                else { id = UUID().uuidString }
+                usedIDs.insert(id)
+                try autoreleasepool {
+                    guard let data = metadata.imageFilename.flatMap({ contents.imageData(named: $0) }) ?? metadata.legacyImageData else {
+                        throw BackupError.damagedPhoto(metadata.dayKey ?? metadata.day.description)
                     }
-                    entry.id = backupID
-                }
-                entry.day = normalizedDate
-                entry.captureDate = backupEntry.captureDate
-                entry.imageFilename = nil
-                entry.latitude = backupEntry.latitude
-                entry.longitude = backupEntry.longitude
-                entry.timezone = backupEntry.timezone ?? entry.timezone
-                entry.countryCode = backupEntry.countryCode
-                entry.countryName = backupEntry.countryName
-                entry.city = backupEntry.city
-                entry.caption = backupEntry.caption
-                entry.metadataSyncState = .localOnly
-
-                if let filename = backupEntry.imageFilename,
-                   let imageData = contents.imageData(named: filename) {
-                    let storedPhotos = try autoreleasepool {
-                        let original = try originalFileStore.write(imageData, ownerID: entry.id)
-                        let generatedThumbnail = try thumbnailData(from: imageData)
-                        let thumbnail = try thumbnailFileStore.write(generatedThumbnail, ownerID: entry.id)
-                        let generatedViewPhoto = try viewPhotoData(from: imageData)
-                        let viewPhoto = try viewPhotoFileStore.write(generatedViewPhoto, ownerID: entry.id)
-                        return (original, thumbnail, viewPhoto)
+                    if let expected = metadata.imageSHA256, BackupArchiveReader.hash(data) != expected {
+                        throw BackupError.damagedPhoto(metadata.imageFilename ?? id)
                     }
-                    trackReplacement(
-                        oldFilename: entry.localOriginalFilename,
-                        newFilename: storedPhotos.0.filename,
-                        replaced: &replacedOriginalFilenames
-                    )
-                    entry.imageData = nil
-                    try? thumbnailFileStore.remove(filename: entry.localThumbnailFilename)
-                    entry.thumbnailData = nil
-                    entry.localThumbnailFilename = storedPhotos.1.filename
-                    entry.thumbnailByteCount = storedPhotos.1.byteCount
-                    entry.thumbnailContentHash = storedPhotos.1.contentHash
-                    entry.thumbnailModifiedAt = .now
-                    entry.thumbnailSyncState = .localOnly
-                    try? viewPhotoFileStore.remove(filename: entry.localViewPhotoFilename)
-                    entry.localViewPhotoFilename = storedPhotos.2.filename
-                    entry.viewPhotoByteCount = storedPhotos.2.byteCount
-                    entry.viewPhotoContentHash = storedPhotos.2.contentHash
-                    entry.viewPhotoModifiedAt = .now
-                    entry.viewPhotoSyncState = .localOnly
-                    entry.localOriginalFilename = storedPhotos.0.filename
-                    entry.originalByteCount = storedPhotos.0.byteCount
-                    entry.originalContentHash = storedPhotos.0.contentHash
-                    entry.originalSyncState = .localOnly
-                } else if let legacyImageData = backupEntry.legacyImageData {
-                    let storedOriginal = try originalFileStore.write(legacyImageData, ownerID: entry.id)
-                    let generatedThumbnailData = try (
-                        backupEntry.legacyThumbnailData
-                            ?? thumbnailData(from: legacyImageData)
-                    )
-                    let storedThumbnail = try thumbnailFileStore.write(generatedThumbnailData, ownerID: entry.id)
-                    let generatedViewPhotoData = try viewPhotoData(from: legacyImageData)
-                    let storedViewPhoto = try viewPhotoFileStore.write(generatedViewPhotoData, ownerID: entry.id)
-                    trackReplacement(
-                        oldFilename: entry.localOriginalFilename,
-                        newFilename: storedOriginal.filename,
-                        replaced: &replacedOriginalFilenames
-                    )
-                    entry.imageData = nil
-                    try? thumbnailFileStore.remove(filename: entry.localThumbnailFilename)
-                    entry.thumbnailData = nil
-                    entry.localThumbnailFilename = storedThumbnail.filename
-                    entry.thumbnailByteCount = storedThumbnail.byteCount
-                    entry.thumbnailContentHash = storedThumbnail.contentHash
-                    entry.thumbnailModifiedAt = .now
-                    entry.thumbnailSyncState = .localOnly
-                    try? viewPhotoFileStore.remove(filename: entry.localViewPhotoFilename)
-                    entry.localViewPhotoFilename = storedViewPhoto.filename
-                    entry.viewPhotoByteCount = storedViewPhoto.byteCount
-                    entry.viewPhotoContentHash = storedViewPhoto.contentHash
-                    entry.viewPhotoModifiedAt = .now
-                    entry.viewPhotoSyncState = .localOnly
-                    entry.localOriginalFilename = storedOriginal.filename
-                    entry.originalByteCount = storedOriginal.byteCount
-                    entry.originalContentHash = storedOriginal.contentHash
-                    entry.originalSyncState = .localOnly
+                    let thumbnailData = try thumbnailData(from: data)
+                    let viewData = try viewPhotoData(from: data)
+                    let original = try originalFileStore.write(data, ownerID: id)
+                    newOriginals.insert(original.filename)
+                    let thumbnail = try thumbnailFileStore.write(thumbnailData, ownerID: id)
+                    newThumbnails.insert(thumbnail.filename)
+                    let view = try viewPhotoFileStore.write(viewData, ownerID: id)
+                    newViews.insert(view.filename)
+                    prepared.append(PreparedPhoto(metadata: metadata, day: day, id: id, existing: existing,
+                                                  original: original, thumbnail: thumbnail, view: view))
                 }
-
-                invalidateCaches(for: entry)
-
-                if (index + 1).isMultiple(of: 5) {
-                    try modelContext.save()
-                }
+                progress(index + 1, contents.payload.entries.count)
                 await Task.yield()
             }
-
+            try Task.checkCancellation()
+            let currentEntries = try modelContext.fetch(FetchDescriptor<PhotoEntry>())
+            guard Set(currentEntries.map(\.id)) == Set(initialEntries.map(\.id)),
+                  initialEntries.enumerated().allSatisfy({ !$0.element.isDeleted && backupEntry($0.element) == initialMetadata[$0.offset] && originalRevision($0.element) == initialSources[$0.offset] }) else {
+                throw BackupError.libraryChanged
+            }
+            modelContext.autosaveEnabled = false
+            didStartApplying = true
+            // This section does not suspend: commit all metadata in one save.
+            for photo in prepared {
+                let entry = photo.existing ?? PhotoEntry(id: photo.id, day: photo.day)
+                if entry.modelContext == nil { modelContext.insert(entry) }
+                if let filename = entry.localOriginalFilename { replacedOriginals.insert(filename) }
+                if let filename = entry.localThumbnailFilename { replacedThumbnails.insert(filename) }
+                if let filename = entry.localViewPhotoFilename { replacedViews.insert(filename) }
+                let metadata = photo.metadata
+                entry.day = photo.day
+                entry.captureDate = metadata.captureDate
+                entry.latitude = metadata.latitude
+                entry.longitude = metadata.longitude
+                entry.timezone = metadata.timezone
+                entry.countryCode = metadata.countryCode
+                entry.countryName = metadata.countryName
+                entry.city = metadata.city
+                entry.caption = metadata.caption
+                entry.imageFilename = nil
+                entry.imageData = nil
+                entry.thumbnailData = nil
+                entry.localOriginalFilename = photo.original.filename
+                entry.originalContentHash = photo.original.contentHash
+                entry.originalByteCount = photo.original.byteCount
+                entry.originalSyncState = .localOnly
+                entry.localThumbnailFilename = photo.thumbnail.filename
+                entry.thumbnailContentHash = photo.thumbnail.contentHash
+                entry.thumbnailByteCount = photo.thumbnail.byteCount
+                entry.thumbnailModifiedAt = .now
+                entry.thumbnailSyncState = .localOnly
+                entry.localViewPhotoFilename = photo.view.filename
+                entry.viewPhotoContentHash = photo.view.contentHash
+                entry.viewPhotoByteCount = photo.view.byteCount
+                entry.viewPhotoModifiedAt = .now
+                entry.viewPhotoSyncState = .localOnly
+                entry.metadataSyncState = .localOnly
+                try MetadataSyncCoordinator.recordRestoredMetadata(for: entry)
+                invalidateCaches(for: entry)
+            }
             try modelContext.save()
         } catch {
+            if didStartApplying { modelContext.rollback() }
+            let liveEntries = (try? modelContext.fetch(FetchDescriptor<PhotoEntry>())) ?? initialEntries
+            let protectedOriginals = oldOriginals.union(liveEntries.compactMap(\.localOriginalFilename))
+            let protectedThumbnails = oldThumbnails.union(liveEntries.compactMap(\.localThumbnailFilename))
+            let protectedViews = oldViews.union(liveEntries.compactMap(\.localViewPhotoFilename))
+            for filename in newOriginals.subtracting(protectedOriginals) { try? originalFileStore.remove(filename: filename) }
+            for filename in newThumbnails.subtracting(protectedThumbnails) { try? thumbnailFileStore.remove(filename: filename) }
+            for filename in newViews.subtracting(protectedViews) { try? viewPhotoFileStore.remove(filename: filename) }
             throw error
         }
-
-        for filename in replacedOriginalFilenames {
+        // Old files are only removed once the entire restore has committed.
+        let finalEntries = try modelContext.fetch(FetchDescriptor<PhotoEntry>())
+        for filename in replacedOriginals.subtracting(finalEntries.compactMap(\.localOriginalFilename)) {
             try? originalFileStore.remove(filename: filename)
         }
+        for filename in replacedThumbnails.subtracting(finalEntries.compactMap(\.localThumbnailFilename)) {
+            try? thumbnailFileStore.remove(filename: filename)
+        }
+        for filename in replacedViews.subtracting(finalEntries.compactMap(\.localViewPhotoFilename)) {
+            try? viewPhotoFileStore.remove(filename: filename)
+        }
+        return BackupImportSummary(imported: prepared.count, skipped: skipped)
+    }
+
+    private func originalRevision(_ entry: PhotoEntry) -> String {
+        [entry.localOriginalFilename, entry.originalContentHash, entry.imageFilename,
+         entry.imageData.map(BackupArchiveReader.hash)].map { $0 ?? "" }.joined(separator: "|")
     }
 
     func backfillMetadata(for entries: [PhotoEntry], in modelContext: ModelContext) {
@@ -765,8 +839,8 @@ struct PhotoStore {
 
         if removedCount > 0 {
             try modelContext.save()
-            Task.detached(priority: .utility) {
-                await SyncDeletionCoordinator().flush()
+            Task.detached(priority: .utility) { [flushPendingDeletions] in
+                await flushPendingDeletions()
             }
         }
         return removedCount
@@ -946,29 +1020,48 @@ struct PhotoStore {
         #endif
     }
 
-    func backfillLocationDetails(for entries: [PhotoEntry], in modelContext: ModelContext) async {
+    func backfillLocationDetails(
+        for entries: [PhotoEntry],
+        in modelContext: ModelContext,
+        geocode: (Double, Double) async -> GeocodedLocation = { latitude, longitude in
+            await LocationGeocoder.reverseGeocode(
+                latitude: latitude,
+                longitude: longitude,
+                preferredLocale: Locale(identifier: "en")
+            )
+        }
+    ) async {
         let needsNormalization = !UserDefaults.standard.bool(forKey: "locationNamesNormalizedToEnglish")
-        var didUpdate = false
+        var completedNormalization = true
         for entry in entries {
+            guard !Task.isCancelled else { return }
             guard let lat = entry.latitude, let lon = entry.longitude else { continue }
 
-            let needsBackfill = entry.countryCode == nil || entry.countryName == nil || entry.city == nil
+            let hasValidCountryCode = LocationGeocoder.normalizedCountryCode(entry.countryCode) != nil
+            let needsBackfill = !hasValidCountryCode || entry.countryName == nil || entry.city == nil
             guard needsBackfill || needsNormalization else { continue }
 
-            let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
-            let details = await reverseGeocodeDetails(for: coordinate)
-            if entry.countryCode != details.countryCode || entry.countryName != details.countryName || entry.city != details.city {
-                entry.countryCode = details.countryCode ?? entry.countryCode
-                entry.countryName = details.countryName ?? entry.countryName
-                entry.city = details.city ?? entry.city
-                didUpdate = true
+            let details = await geocode(lat, lon)
+            guard !Task.isCancelled else { return }
+            // A user may edit or delete the entry while the network request runs.
+            guard entry.modelContext != nil, !entry.isDeleted,
+                  entry.latitude == lat, entry.longitude == lon else { continue }
+            let code = LocationGeocoder.normalizedCountryCode(details.countryCode) ?? entry.countryCode
+            let name = details.countryName ?? entry.countryName
+            let city = details.city ?? entry.city
+            if details.countryCode == nil && details.countryName == nil && details.city == nil {
+                completedNormalization = false
+            }
+            if entry.countryCode != code || entry.countryName != name || entry.city != city {
+                entry.countryCode = code
+                entry.countryName = name
+                entry.city = city
+                // Persist each result so cancellation cannot discard earlier repairs.
+                do { try modelContext.save() } catch { return }
             }
         }
-        if needsNormalization {
+        if needsNormalization && completedNormalization {
             UserDefaults.standard.set(true, forKey: "locationNamesNormalizedToEnglish")
-        }
-        if didUpdate {
-            try? modelContext.save()
         }
     }
 
@@ -977,13 +1070,11 @@ struct PhotoStore {
         guard let entries = try? modelContext.fetch(descriptor) else { return }
 
         var migratedAnyEntries = false
-        var allLegacyFilesWereMigrated = true
 
         for entry in entries where entry.imageData == nil && entry.localOriginalFilename == nil {
-            guard let filename = entry.imageFilename else { continue }
+            guard let filename = entry.imageFilename, BackupArchiveReader.isSafeFilename(filename) else { continue }
             let fileURL = legacyFileURL(filename: filename)
             guard fileManager.fileExists(atPath: fileURL.path) else {
-                allLegacyFilesWereMigrated = false
                 continue
             }
 
@@ -1024,25 +1115,21 @@ struct PhotoStore {
                     }
                 }
 
-                entry.imageFilename = nil
+                // Retain the historical filename as a read-only fallback.
                 invalidateCaches(for: entry)
                 migratedAnyEntries = true
             } catch {
-                allLegacyFilesWereMigrated = false
+                continue // Leave legacy bytes available for a later retry/export.
             }
         }
 
         if migratedAnyEntries {
-            do {
-                try modelContext.save()
-            } catch {
-                allLegacyFilesWereMigrated = false
-            }
+            try? modelContext.save()
         }
 
-        if migratedAnyEntries && allLegacyFilesWereMigrated {
-            removeLegacyPhotosDirectoryIfPossible()
-        }
+        // Keep the historical originals through upgrades. A missing/stale modern
+        // file can still fall back to them, and export does not require migration.
+        // Cleanup must be a separate, verified operation, never a launch side effect.
     }
 
     private func existingEntry(for date: Date, in modelContext: ModelContext) throws -> PhotoEntry? {
@@ -1054,7 +1141,7 @@ struct PhotoStore {
     }
 
     private var legacyPhotosDirectoryURL: URL {
-        fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        legacyDirectoryOverride ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("DayPhotos", isDirectory: true)
     }
 
@@ -1092,11 +1179,6 @@ struct PhotoStore {
 
     private func legacyFileURL(filename: String) -> URL {
         legacyPhotosDirectoryURL.appendingPathComponent(filename)
-    }
-
-    private func removeLegacyPhotosDirectoryIfPossible() {
-        guard fileManager.fileExists(atPath: legacyPhotosDirectoryURL.path) else { return }
-        try? fileManager.removeItem(at: legacyPhotosDirectoryURL)
     }
 
     private func trackReplacement(
@@ -1195,33 +1277,12 @@ struct PhotoStore {
     }
 
     private func reverseGeocodeDetails(for coordinate: CLLocationCoordinate2D) async -> (countryCode: String?, countryName: String?, city: String?) {
-        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-        guard let request = MKReverseGeocodingRequest(location: location) else {
-            return (nil, nil, nil)
-        }
-        request.preferredLocale = Locale(identifier: "en")
-        guard let mapItem = try? await request.mapItems.first else {
-            return (nil, nil, nil)
-        }
-
-        let address = mapItem.addressRepresentations
-        let city = address?.cityName ?? mapItem.name
-        let countryCode = address?.region?.identifier.uppercased()
-        let countryName = address?.regionName
-        return (countryCode, countryName, city)
-    }
-
-    private func encodedBackupData(for payload: DaymarkBackupPayload) throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        return try encoder.encode(payload)
-    }
-
-    private func decodedBackupPayload(from data: Data) throws -> DaymarkBackupPayload {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(DaymarkBackupPayload.self, from: data)
+        let details = await LocationGeocoder.reverseGeocode(
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            preferredLocale: Locale(identifier: "en")
+        )
+        return (details.countryCode, details.countryName, details.city)
     }
 
     private func signedCoordinate(_ value: Double, reference: String?, negativeReference: String) -> Double {
@@ -1497,11 +1558,11 @@ enum PhotoStoreError: LocalizedError {
     }
 }
 
-struct DaymarkBackupEntry: Codable {
+nonisolated struct DaymarkBackupEntry: Codable, Sendable, Equatable {
     let id: String?
     let day: Date
     let captureDate: Date?
-    let imageFilename: String?
+    var imageFilename: String?
     let latitude: Double?
     let longitude: Double?
     let timezone: String?
@@ -1512,197 +1573,36 @@ struct DaymarkBackupEntry: Codable {
 
     var legacyImageData: Data? = nil
     var legacyThumbnailData: Data? = nil
+    var imageByteCount: Int64? = nil
+    var imageSHA256: String? = nil
+    var dayKey: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, day, captureDate, imageFilename
         case latitude, longitude, timezone
         case countryCode, countryName, city, caption
+        case imageByteCount, imageSHA256, dayKey
         case legacyImageData = "imageData"
         case legacyThumbnailData = "thumbnailData"
     }
 }
 
-struct DaymarkBackupPayload: Codable {
+nonisolated struct DaymarkBackupPayload: Codable, Sendable {
     let version: Int
     let exportedAt: Date
     let entries: [DaymarkBackupEntry]
 }
 
 struct DaymarkBackupExportItem: Transferable {
-    let data: Data
+    let url: URL
+    let entryCount: Int
+    let byteCount: Int64
+
+    func cleanUp() { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
 
     static var transferRepresentation: some TransferRepresentation {
-        DataRepresentation(exportedContentType: .zip) { item in
-            item.data
+        FileRepresentation(exportedContentType: .zip) { item in
+            SentTransferredFile(item.url)
         }
-    }
-}
-
-// MARK: - Zip Archive
-
-enum ZipArchive {
-    struct Entry {
-        let path: String
-        let data: Data
-    }
-
-    struct IndexedEntry {
-        let path: String
-        let dataRange: Range<Int>
-    }
-
-    static func create(entries: [Entry]) -> Data {
-        var archive = Data()
-        var centralDirectory = Data()
-        var entryCount: UInt16 = 0
-
-        for entry in entries {
-            let nameData = Data(entry.path.utf8)
-            let crc = crc32Checksum(entry.data)
-            let offset = UInt32(archive.count)
-            let size = UInt32(entry.data.count)
-
-            archive.appendUInt32(0x04034b50)
-            archive.appendUInt16(20)
-            archive.appendUInt16(0)
-            archive.appendUInt16(0)
-            archive.appendUInt16(0)
-            archive.appendUInt16(0)
-            archive.appendUInt32(crc)
-            archive.appendUInt32(size)
-            archive.appendUInt32(size)
-            archive.appendUInt16(UInt16(nameData.count))
-            archive.appendUInt16(0)
-            archive.append(nameData)
-            archive.append(entry.data)
-
-            centralDirectory.appendUInt32(0x02014b50)
-            centralDirectory.appendUInt16(20)
-            centralDirectory.appendUInt16(20)
-            centralDirectory.appendUInt16(0)
-            centralDirectory.appendUInt16(0)
-            centralDirectory.appendUInt16(0)
-            centralDirectory.appendUInt16(0)
-            centralDirectory.appendUInt32(crc)
-            centralDirectory.appendUInt32(size)
-            centralDirectory.appendUInt32(size)
-            centralDirectory.appendUInt16(UInt16(nameData.count))
-            centralDirectory.appendUInt16(0)
-            centralDirectory.appendUInt16(0)
-            centralDirectory.appendUInt16(0)
-            centralDirectory.appendUInt16(0)
-            centralDirectory.appendUInt32(0)
-            centralDirectory.appendUInt32(offset)
-            centralDirectory.append(nameData)
-
-            entryCount += 1
-        }
-
-        let centralDirectoryOffset = UInt32(archive.count)
-        archive.append(centralDirectory)
-
-        archive.appendUInt32(0x06054b50)
-        archive.appendUInt16(0)
-        archive.appendUInt16(0)
-        archive.appendUInt16(entryCount)
-        archive.appendUInt16(entryCount)
-        archive.appendUInt32(UInt32(centralDirectory.count))
-        archive.appendUInt32(centralDirectoryOffset)
-        archive.appendUInt16(0)
-
-        return archive
-    }
-
-    static func index(from data: Data) throws -> [IndexedEntry] {
-        guard data.count >= 22 else { throw BackupError.invalidArchive }
-
-        var eocdOffset = data.count - 22
-        while eocdOffset >= 0 {
-            if data.readZipUInt32(at: eocdOffset) == 0x06054b50 { break }
-            eocdOffset -= 1
-        }
-        guard eocdOffset >= 0 else { throw BackupError.invalidArchive }
-
-        let entryCount = Int(data.readZipUInt16(at: eocdOffset + 10))
-        let centralDirOffset = Int(data.readZipUInt32(at: eocdOffset + 16))
-
-        var entries: [IndexedEntry] = []
-        var offset = centralDirOffset
-
-        for _ in 0..<entryCount {
-            guard offset + 46 <= data.count,
-                  data.readZipUInt32(at: offset) == 0x02014b50 else {
-                throw BackupError.invalidArchive
-            }
-
-            // Only "stored" (method 0) entries are supported; re-zipped archives use deflate.
-            guard data.readZipUInt16(at: offset + 10) == 0 else {
-                throw BackupError.invalidArchive
-            }
-            let compressedSize = Int(data.readZipUInt32(at: offset + 20))
-            let nameLength = Int(data.readZipUInt16(at: offset + 28))
-            let extraLength = Int(data.readZipUInt16(at: offset + 30))
-            let commentLength = Int(data.readZipUInt16(at: offset + 32))
-            let localOffset = Int(data.readZipUInt32(at: offset + 42))
-
-            let nameStart = offset + 46
-            guard nameStart + nameLength <= data.count else { throw BackupError.invalidArchive }
-            let name = String(data: data[nameStart..<nameStart + nameLength], encoding: .utf8) ?? ""
-
-            guard localOffset + 30 <= data.count else { throw BackupError.invalidArchive }
-            let localNameLength = Int(data.readZipUInt16(at: localOffset + 26))
-            let localExtraLength = Int(data.readZipUInt16(at: localOffset + 28))
-            let dataStart = localOffset + 30 + localNameLength + localExtraLength
-            guard dataStart + compressedSize <= data.count else { throw BackupError.invalidArchive }
-
-            entries.append(
-                IndexedEntry(
-                    path: name,
-                    dataRange: dataStart..<(dataStart + compressedSize)
-                )
-            )
-            offset = nameStart + nameLength + extraLength + commentLength
-        }
-
-        return entries
-    }
-
-    static func read(from data: Data) throws -> [Entry] {
-        try index(from: data).map {
-            Entry(path: $0.path, data: data.subdata(in: $0.dataRange))
-        }
-    }
-
-    private static let crc32Table: [UInt32] = (0..<256).map { i in
-        var c = UInt32(i)
-        for _ in 0..<8 { c = (c & 1) != 0 ? (0xEDB88320 ^ (c >> 1)) : (c >> 1) }
-        return c
-    }
-
-    private static func crc32Checksum(_ data: Data) -> UInt32 {
-        var crc: UInt32 = 0xFFFFFFFF
-        for byte in data { crc = crc32Table[Int((crc ^ UInt32(byte)) & 0xFF)] ^ (crc >> 8) }
-        return crc ^ 0xFFFFFFFF
-    }
-}
-
-private extension Data {
-    mutating func appendUInt16(_ value: UInt16) {
-        var v = value.littleEndian
-        append(Data(bytes: &v, count: 2))
-    }
-
-    mutating func appendUInt32(_ value: UInt32) {
-        var v = value.littleEndian
-        append(Data(bytes: &v, count: 4))
-    }
-
-    func readZipUInt16(at offset: Int) -> UInt16 {
-        UInt16(self[offset]) | (UInt16(self[offset + 1]) << 8)
-    }
-
-    func readZipUInt32(at offset: Int) -> UInt32 {
-        UInt32(self[offset]) | (UInt32(self[offset + 1]) << 8) |
-        (UInt32(self[offset + 2]) << 16) | (UInt32(self[offset + 3]) << 24)
     }
 }

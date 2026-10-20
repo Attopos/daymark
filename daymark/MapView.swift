@@ -49,7 +49,8 @@ struct MapView: View {
                 MapScaleView()
             }
             .mapScope(mapScope)
-            .navigationTitle("Maps")
+            .daymarkScreen()
+            .daymarkNavigationTitle("Maps")
             .toolbarTitleDisplayMode(.inlineLarge)
             .onAppear {
                 locationManager.requestAuthorizationIfNeeded()
@@ -270,7 +271,7 @@ struct ClusterAnnotation: View {
     var body: some View {
         EntryThumbnail(entry: entry) {
             ZStack {
-                Color(.secondarySystemBackground)
+                DaymarkPalette.recessed
                 Image(systemName: "photo.stack")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -280,19 +281,19 @@ struct ClusterAnnotation: View {
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(Color.white, lineWidth: 2)
+                .stroke(DaymarkPalette.photoMount, lineWidth: 2)
         }
         .overlay(alignment: .topTrailing) {
             Text(count > 99 ? "99+" : "\(count)")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(DaymarkPalette.buttonText)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 1)
-                .background(Color.accentColor, in: Capsule())
-                .overlay { Capsule().stroke(Color.white, lineWidth: 1.5) }
+                .background(DaymarkPalette.buttonFill, in: Capsule())
+                .overlay { Capsule().stroke(DaymarkPalette.photoMount, lineWidth: 1.5) }
                 .offset(x: 7, y: -7)
         }
-        .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
     }
 }
 
@@ -303,7 +304,7 @@ struct PhotoMapAnnotation: View {
         VStack(spacing: 0) {
             EntryThumbnail(entry: entry) {
                 ZStack {
-                    Color(.secondarySystemBackground)
+                    DaymarkPalette.recessed
 
                     Image(systemName: "photo")
                         .font(.system(size: 10, weight: .medium))
@@ -314,13 +315,13 @@ struct PhotoMapAnnotation: View {
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.white, lineWidth: 2)
+                    .stroke(DaymarkPalette.photoMount, lineWidth: 2)
             }
-            .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+            .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
 
             Image(systemName: "triangle.fill")
                 .font(.system(size: 8))
-                .foregroundStyle(.white)
+                .foregroundStyle(DaymarkPalette.photoMount)
                 .offset(y: -2)
         }
     }

@@ -27,6 +27,9 @@ struct ContentView: View {
                 SettingsView(prefersDarkMode: $prefersDarkMode)
             }
         }
+        .tint(DaymarkPalette.accent)
+        .buttonBorderShape(.capsule)
+        .toolbarBackground(DaymarkPalette.paper, for: .tabBar)
         .preferredColorScheme(prefersDarkMode ? .dark : .light)
         .task(id: assetSyncKey) {
             try? await Task.sleep(for: .milliseconds(300))

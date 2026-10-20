@@ -35,21 +35,14 @@ final class LocationLocalizer {
             return
         }
 
-        let location = CLLocation(latitude: lat, longitude: lon)
-        guard let request = MKReverseGeocodingRequest(location: location) else {
-            cache[key] = LocalizedLocation(city: entry.city, countryName: entry.countryName)
-            return
-        }
-        request.preferredLocale = Locale.current
-        guard let mapItem = try? await request.mapItems.first else {
-            cache[key] = LocalizedLocation(city: entry.city, countryName: entry.countryName)
-            return
-        }
-
-        let address = mapItem.addressRepresentations
+        let details = await LocationGeocoder.reverseGeocode(
+            latitude: lat,
+            longitude: lon,
+            preferredLocale: .current
+        )
         cache[key] = LocalizedLocation(
-            city: address?.cityName ?? mapItem.name ?? entry.city,
-            countryName: address?.regionName ?? entry.countryName
+            city: details.city ?? entry.city,
+            countryName: details.countryName ?? entry.countryName
         )
     }
 

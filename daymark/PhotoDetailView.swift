@@ -31,7 +31,8 @@ struct PhotoDetailView: View {
             .padding(.top, 8)
             .padding(.bottom, 32)
         }
-        .navigationTitle(entry.day.formatted(.dateTime.month(.wide).day().year()))
+        .daymarkScreen()
+        .daymarkNavigationTitle(entry.day.formatted(.dateTime.month(.wide).day().year()), inline: true)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -136,7 +137,7 @@ struct PhotoDetailView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 } else {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color(.secondarySystemBackground))
+                        .fill(DaymarkPalette.recessed)
                         .aspectRatio(1, contentMode: .fit)
                         .overlay {
                             if isDownloadingViewPhoto {
@@ -144,7 +145,7 @@ struct PhotoDetailView: View {
                             } else {
                                 Image(systemName: "photo")
                                     .font(.system(size: 40, weight: .medium))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(DaymarkPalette.secondaryInk)
                             }
                         }
                 }
@@ -238,7 +239,7 @@ struct PhotoDetailView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .daymarkSurface(cornerRadius: 12)
     }
 
     private var deleteSection: some View {
@@ -260,13 +261,13 @@ struct PhotoDetailView: View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(DaymarkPalette.secondaryInk)
                 .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(DaymarkTypography.metadata)
+                    .foregroundStyle(DaymarkPalette.secondaryInk)
                 Text(value)
                     .font(.subheadline)
             }
