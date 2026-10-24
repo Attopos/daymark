@@ -90,7 +90,8 @@ actor BackupArchiveWriter {
         guard let archive else { throw BackupError.invalidArchive }
         try archive.addEntry(with: path, type: .file, uncompressedSize: Int64(data.count), bufferSize: 262_144) { position, count in
             try Task.checkCancellation()
-            return data.subdata(in: Int(position)..<(Int(position) + count))
+            let start = data.startIndex + Int(position)
+            return data.subdata(in: start..<(start + count))
         }
     }
 }

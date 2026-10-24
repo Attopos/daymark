@@ -17,10 +17,10 @@ final class daymarkUITests: XCTestCase {
             let app = XCUIApplication()
             app.launchArguments = ["-hasCompletedWelcome", "YES", "-prefersDarkMode", darkMode ? "YES" : "NO"]
             app.launch()
-            for title in ["Calendar", "Maps", "Timeline", "Settings"] {
+            for title in ["Calendar", "Maps", "Daily", "Settings"] {
                 XCTAssertTrue(app.tabBars.buttons[title].waitForExistence(timeout: 10), title)
             }
-            for title in ["Calendar", "Timeline"] {
+            for title in ["Calendar", "Daily"] {
                 app.tabBars.buttons[title].tap()
                 let heading = title == "Calendar" ? "Daymark" : title
                 XCTAssertTrue(app.navigationBars[heading].waitForExistence(timeout: 5))

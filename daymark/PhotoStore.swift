@@ -1593,7 +1593,11 @@ nonisolated struct DaymarkBackupPayload: Codable, Sendable {
     let entries: [DaymarkBackupEntry]
 }
 
-struct DaymarkBackupExportItem: Transferable {
+// SwiftUI asks for the transfer representation off the main thread while
+// presenting fileExporter. Under the target's MainActor default isolation this
+// type (and its Transferable conformance) would otherwise be main-actor bound,
+// and that off-main access traps at runtime.
+nonisolated struct DaymarkBackupExportItem: Transferable, Sendable {
     let url: URL
     let entryCount: Int
     let byteCount: Int64
