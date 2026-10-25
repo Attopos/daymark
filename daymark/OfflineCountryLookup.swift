@@ -4,12 +4,14 @@ import CoreLocation
 /// Country-only fallback when Apple's regional geocoding service has no result.
 /// Natural Earth boundaries are approximate; never guess the nearest country
 /// for ocean coordinates or areas without an assigned ISO code.
-enum OfflineCountryLookup {
-    private struct BoundaryFile: Decodable {
+/// Nonisolated because the first lookup parses an 11 MB boundary file; callers
+/// on the main actor should run it in a detached task.
+nonisolated enum OfflineCountryLookup {
+    private nonisolated struct BoundaryFile: Decodable {
         let polygons: [Polygon]
     }
 
-    private struct Polygon: Decodable {
+    private nonisolated struct Polygon: Decodable {
         let code: String
         let bounds: [Double]
         let rings: [[[Double]]]

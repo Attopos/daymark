@@ -1,5 +1,7 @@
+import CoreImage
 import PhotosUI
 import SwiftUI
+import UIKit
 
 /// Regular grid cut of one month into square day pieces, centred in the page.
 /// Leading leftover cells of the first row merge into a single title piece,
@@ -150,27 +152,30 @@ struct MonthPuzzleView: View {
             MonthLettering(month: month)
                 .frame(width: pageSize.width, height: pageSize.height)
 
-            ZStack(alignment: .topLeading) {
-                ForEach(entriesByDay.keys.sorted(), id: \.self) { day in
-                    if let entry = entriesByDay[day], (1...dayCount).contains(day) {
-                        let rect = layout.rect(forDay: day)
-                        EntryThumbnail(entry: entry) { Color.clear }
-                            .frame(width: rect.width * 1.7, height: rect.height * 1.7)
-                            .clipped()
-                            .offset(
-                                x: pagePadding.leading + rect.midX - rect.width * 0.85,
-                                y: pagePadding.top + rect.midY - rect.height * 0.85
-                            )
-                    }
-                }
-            }
-            .frame(width: pageSize.width, height: pageSize.height, alignment: .topLeading)
-            .blur(radius: 36)
-            .opacity(0.85)
+            MonthPhotoGlow(photos: glowPhotos(layout: layout), pageSize: pageSize, blurRadius: 36)
+                .opacity(0.85)
         }
         .frame(width: pageSize.width, height: pageSize.height)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+
+    /// Each marked day's photo blown up to 1.7x its square, centred on it, in
+    /// day order so later days paint over earlier ones.
+    private func glowPhotos(layout: MonthPuzzleLayout) -> [MonthPhotoGlow.Photo] {
+        entriesByDay.keys.sorted().compactMap { day in
+            guard let entry = entriesByDay[day], (1...dayCount).contains(day) else { return nil }
+            let rect = layout.rect(forDay: day)
+            return MonthPhotoGlow.Photo(
+                entry: entry,
+                frame: CGRect(
+                    x: pagePadding.leading + rect.midX - rect.width * 0.85,
+                    y: pagePadding.top + rect.midY - rect.height * 0.85,
+                    width: rect.width * 1.7,
+                    height: rect.height * 1.7
+                )
+            )
+        }
     }
 
     // MARK: Pieces
@@ -356,5 +361,177 @@ private struct MonthLettering: View {
         }
         .foregroundStyle(DaymarkPalette.accent.opacity(0.22))
         .accessibilityHidden(true)
+    }
+}
+
+/// The blurred photo wash behind a month's glass. A live `.blur(radius: 36)` over
+/// the whole page was re-rendered by the GPU on every scrolling frame, under
+/// dozens of materials; this paints the same blur once into a small bitmap,
+/// off the main thread, and caches it per month layout.
+struct MonthPhotoGlow: View {
+    struct Photo {
+        let entry: PhotoEntry
+        /// Where the photo is drawn (aspect-filled and clipped), in page points.
+        let frame: CGRect
+    }
+
+    let photos: [Photo]
+    let pageSize: CGSize
+    let blurRadius: CGFloat
+
+    @State private var rendered: UIImage?
+
+    private static let cache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 16
+        return cache
+    }()
+
+    var body: some View {
+        let key = cacheKey
+        let image = Self.cache.object(forKey: key as NSString) ?? rendered
+
+        ZStack {
+            if let image, !photos.isEmpty {
+                Image(uiImage: image)
+                    .resizable()
+            }
+        }
+        .frame(width: pageSize.width, height: pageSize.height)
+        .task(id: key) {
+            await render(key: key)
+        }
+    }
+
+    /// Changes whenever a photo, its thumbnail file or its place on the page does.
+    private var cacheKey: String {
+        var parts = ["\(Int(pageSize.width))x\(Int(pageSize.height))@\(blurRadius)"]
+        for photo in photos {
+            let frame = photo.frame.integral
+            parts.append("\(ThumbnailImageLoader.identity(for: photo.entry))@\(Int(frame.minX)),\(Int(frame.minY)),\(Int(frame.width))")
+        }
+        return parts.joined(separator: ";")
+    }
+
+    private func render(key: String) async {
+        guard !photos.isEmpty else {
+            rendered = nil
+            return
+        }
+        if let cached = Self.cache.object(forKey: key as NSString) {
+            rendered = cached
+            return
+        }
+
+        // Read the models here on the main actor before anything suspends.
+        let sources = photos.map { photo in
+            let filename = photo.entry.localThumbnailFilename
+            return (
+                identity: ThumbnailImageLoader.identity(for: photo.entry),
+                filename: filename,
+                embedded: filename == nil ? photo.entry.thumbnailData : nil,
+                frame: photo.frame
+            )
+        }
+
+        var layers: [MonthGlowRenderer.Layer] = []
+        for source in sources {
+            let image = await ThumbnailImageLoader.shared.thumbnail(
+                identity: source.identity,
+                filename: source.filename,
+                embedded: source.embedded
+            )
+            guard !Task.isCancelled else { return }
+            if let image {
+                layers.append(MonthGlowRenderer.Layer(image: image, frame: source.frame))
+            }
+        }
+
+        let size = pageSize
+        let radius = blurRadius
+        let image = await Task.detached(priority: .userInitiated) {
+            MonthGlowRenderer.render(layers, pageSize: size, blurRadius: radius)
+        }.value
+        guard !Task.isCancelled, let image else { return }
+
+        Self.cache.setObject(image, forKey: key as NSString)
+        if rendered == nil {
+            withAnimation(.easeOut(duration: 0.25)) { rendered = image }
+        } else {
+            rendered = image
+        }
+    }
+}
+
+/// Draws aspect-filled photos into a page-sized bitmap and Gaussian-blurs it,
+/// matching SwiftUI's `.blur`: transparent beyond the page, so the edges fade.
+nonisolated enum MonthGlowRenderer {
+    struct Layer: Sendable {
+        let image: UIImage
+        let frame: CGRect
+    }
+
+    /// Bitmap pixels per point. The blur is so wide that half resolution is
+    /// indistinguishable once scaled back up, at a quarter of the memory.
+    static let scale: CGFloat = 0.5
+
+    nonisolated(unsafe) private static let context = CIContext(options: [.cacheIntermediates: false])
+
+    static func render(_ layers: [Layer], pageSize: CGSize, blurRadius: CGFloat) -> UIImage? {
+        // Photos spill past the page edge before SwiftUI blurs them, so draw a
+        // margin around the page as well and crop it off after the blur.
+        let margin = (blurRadius * 3).rounded(.up)
+        let canvasSize = CGSize(width: pageSize.width + margin * 2, height: pageSize.height + margin * 2)
+        let width = Int((canvasSize.width * scale).rounded(.up))
+        let height = Int((canvasSize.height * scale).rounded(.up))
+        guard pageSize.width > 0, pageSize.height > 0, !layers.isEmpty,
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let bitmap = CGContext(
+                  data: nil,
+                  width: width,
+                  height: height,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: colorSpace,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else {
+            return nil
+        }
+
+        bitmap.interpolationQuality = .medium
+        bitmap.scaleBy(x: scale, y: scale)
+        for layer in layers {
+            guard let cgImage = layer.image.cgImage, cgImage.width > 0, cgImage.height > 0 else { continue }
+            // Core Graphics puts the origin bottom-left; page frames are top-left.
+            let frame = CGRect(
+                x: margin + layer.frame.minX,
+                y: canvasSize.height - margin - layer.frame.maxY,
+                width: layer.frame.width,
+                height: layer.frame.height
+            )
+            let fill = max(frame.width / CGFloat(cgImage.width), frame.height / CGFloat(cgImage.height))
+            let drawSize = CGSize(width: CGFloat(cgImage.width) * fill, height: CGFloat(cgImage.height) * fill)
+            bitmap.saveGState()
+            bitmap.clip(to: frame)
+            bitmap.draw(cgImage, in: CGRect(
+                x: frame.midX - drawSize.width / 2,
+                y: frame.midY - drawSize.height / 2,
+                width: drawSize.width,
+                height: drawSize.height
+            ))
+            bitmap.restoreGState()
+        }
+
+        guard let sharp = bitmap.makeImage() else { return nil }
+        let input = CIImage(cgImage: sharp)
+        let pageRect = CGRect(
+            x: margin * scale,
+            y: margin * scale,
+            width: pageSize.width * scale,
+            height: pageSize.height * scale
+        ).integral
+        let blurred = input.applyingGaussianBlur(sigma: Double(blurRadius * scale))
+        guard let output = context.createCGImage(blurred, from: pageRect) else { return nil }
+        return UIImage(cgImage: output)
     }
 }

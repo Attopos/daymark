@@ -24,6 +24,7 @@ struct CalendarView: View {
         NavigationStack {
             GeometryReader { geometry in
                 let pageHeight = max(geometry.size.height, 1)
+                let entriesByMonth = entriesByMonthAndDay
 
                 // One month per screen; newest at the top, scroll down for earlier months.
                 ScrollView(.vertical) {
@@ -31,7 +32,7 @@ struct CalendarView: View {
                         ForEach(puzzleMonths, id: \.self) { month in
                             MonthPuzzleView(
                                 month: month,
-                                entriesByDay: entriesByDay(in: month),
+                                entriesByDay: entriesByMonth[month] ?? [:],
                                 pickerSelection: pieceSelection(for:)
                             )
                             .frame(height: pageHeight)
@@ -271,11 +272,23 @@ struct CalendarView: View {
         return months
     }
 
-    private func entriesByDay(in month: Date) -> [Int: PhotoEntry] {
-        Dictionary(
-            entries(in: month).map { (calendar.component(.day, from: $0.day), $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
+    /// Every entry keyed by month start, then day of month, in one pass over the
+    /// library. Filtering the whole library again for each month page was
+    /// quadratic in the number of months on screen.
+    private var entriesByMonthAndDay: [Date: [Int: PhotoEntry]] {
+        var result: [Date: [Int: PhotoEntry]] = [:]
+        for entry in entries {
+            let components = calendar.dateComponents([.year, .month, .day], from: entry.day)
+            guard let day = components.day,
+                  let month = calendar.date(from: DateComponents(year: components.year, month: components.month)) else {
+                continue
+            }
+            // Entries are newest first; keep the first one for a day, as before.
+            if result[month]?[day] == nil {
+                result[month, default: [:]][day] = entry
+            }
+        }
+        return result
     }
 
     private func pieceSelection(for date: Date) -> Binding<PhotosPickerItem?> {
@@ -286,10 +299,6 @@ struct CalendarView: View {
                 piecePhotoItem = newItem
             }
         )
-    }
-
-    private func entries(in month: Date) -> [PhotoEntry] {
-        entries.filter { calendar.isDate($0.day, equalTo: month, toGranularity: .month) }
     }
 
     private var errorAlertBinding: Binding<Bool> {
@@ -313,10 +322,20 @@ struct CalendarView: View {
 
     // New imports/cloud arrivals and returning to the app retry missing locations.
     // Exclude resolved names/codes so repairs do not restart their own task.
-    private var locationBackfillKey: String {
-        "\(scenePhase)-" + entries.map {
-            "\($0.id):\($0.latitude?.description ?? ""):\($0.longitude?.description ?? "")"
-        }.sorted().joined(separator: "|")
+    // Order-independent hash (per-entry hashes are wrap-added), so the key is
+    // cheap to rebuild on every body pass instead of a big sorted string.
+    private var locationBackfillKey: Int {
+        var hasher = Hasher()
+        hasher.combine("\(scenePhase)")
+        var combined = hasher.finalize()
+        for entry in entries {
+            var hasher = Hasher()
+            hasher.combine(entry.id)
+            hasher.combine(entry.latitude)
+            hasher.combine(entry.longitude)
+            combined = combined &+ hasher.finalize()
+        }
+        return combined
     }
 
     private func hasEntry(on date: Date) -> Bool {
