@@ -96,12 +96,12 @@ struct PhotoStore {
         return formatter
     }()
 
-    private enum Thumbnail {
+    private nonisolated enum Thumbnail {
         static let maxPixelSize = 300.0
         static let compressionQuality = 0.82
     }
 
-    private enum ViewPhoto {
+    private nonisolated enum ViewPhoto {
         static let maxPixelSize = 2_048.0
         static let compressionQuality = 0.88
     }
@@ -349,8 +349,7 @@ struct PhotoStore {
             nil
         }
         let captureDate = captureDate(from: data) ?? date
-        let thumbnailData = try thumbnailData(from: data)
-        let viewPhotoData = try viewPhotoData(from: data)
+        let (thumbnailData, viewPhotoData) = try await renditions(from: data)
         let entry = try existingEntry(for: normalizedDate, in: modelContext) ?? PhotoEntry(day: normalizedDate)
         let oldImageData = entry.imageData
         let oldThumbnailData = entry.thumbnailData
@@ -984,13 +983,14 @@ struct PhotoStore {
             guard let originalData = originalData(for: entry) else {
                 continue
             }
-            let stored: StoredViewPhoto? = autoreleasepool {
-                guard let generatedData = try? viewPhotoData(from: originalData) else {
-                    return nil
-                }
-                return try? viewPhotoFileStore.write(generatedData, ownerID: entry.id)
+            // The entry may be edited or deleted while the rendition is built.
+            let filenameBeforeRendition = entry.localViewPhotoFilename
+            guard let generatedData = await viewPhotoRendition(from: originalData),
+                  entry.modelContext != nil, !entry.isDeleted,
+                  entry.localViewPhotoFilename == filenameBeforeRendition,
+                  let stored = try? viewPhotoFileStore.write(generatedData, ownerID: entry.id) else {
+                continue
             }
-            guard let stored else { continue }
 
             entry.localViewPhotoFilename = stored.filename
             entry.viewPhotoByteCount = stored.byteCount
@@ -1193,7 +1193,7 @@ struct PhotoStore {
     }
 
     private func thumbnailData(from data: Data) throws -> Data {
-        try renditionData(
+        try Self.renditionData(
             from: data,
             maxPixelSize: Thumbnail.maxPixelSize,
             compressionQuality: Thumbnail.compressionQuality
@@ -1201,14 +1201,43 @@ struct PhotoStore {
     }
 
     private func viewPhotoData(from data: Data) throws -> Data {
-        try renditionData(
+        try Self.renditionData(
             from: data,
             maxPixelSize: ViewPhoto.maxPixelSize,
             compressionQuality: ViewPhoto.compressionQuality
         )
     }
 
-    private func renditionData(
+    /// Thumbnail and view-photo renditions for one original, decoded and
+    /// re-encoded off the main thread. Downsampling a 12-48 MP photo twice is
+    /// the slowest part of an import, and on the main actor it froze the UI.
+    private func renditions(from data: Data) async throws -> (thumbnail: Data, viewPhoto: Data) {
+        try await Task.detached(priority: .userInitiated) {
+            let thumbnail = try Self.renditionData(
+                from: data,
+                maxPixelSize: Thumbnail.maxPixelSize,
+                compressionQuality: Thumbnail.compressionQuality
+            )
+            let viewPhoto = try Self.renditionData(
+                from: data,
+                maxPixelSize: ViewPhoto.maxPixelSize,
+                compressionQuality: ViewPhoto.compressionQuality
+            )
+            return (thumbnail, viewPhoto)
+        }.value
+    }
+
+    private func viewPhotoRendition(from data: Data) async -> Data? {
+        await Task.detached(priority: .utility) {
+            try? Self.renditionData(
+                from: data,
+                maxPixelSize: ViewPhoto.maxPixelSize,
+                compressionQuality: ViewPhoto.compressionQuality
+            )
+        }.value
+    }
+
+    private nonisolated static func renditionData(
         from data: Data,
         maxPixelSize: Double,
         compressionQuality: CGFloat
@@ -1547,7 +1576,7 @@ struct PhotoLocationOverride {
     let countryName: String?
 }
 
-enum PhotoStoreError: LocalizedError {
+nonisolated enum PhotoStoreError: LocalizedError {
     case invalidImageData
 
     var errorDescription: String? {
