@@ -62,6 +62,15 @@ ZIP64. It verifies file paths, duplicate records, CRC, and v3 hashes/sizes, and 
 photos before touching library metadata. Export and import preparation also
 decode photo pixels through ImageIO: a recognizable header and matching checksum
 alone cannot certify a restorable image. It rejects unsupported future versions.
+v1/v2 files came from unvalidated libraries, so for those only: records without
+any photo are skipped, records for the same day are combined into one (the more
+complete record wins, later on ties, and missing details are filled from the
+other), repeated IDs get fresh identities, and repeated images/ paths written by
+the v2 exporter for a duplicated ID are matched to records in order. The import
+confirmation states how many records were combined or skipped. v3 archives are
+still rejected on any duplicate day, ID or filename.
+Staging folders left in tmp by an interrupted export or import are removed at
+the next launch. Switching tabs no longer cancels a running export or import.
 Metadata is capped at 32 MB per ZIP; legacy standalone JSON is capped at 512 MB.
 Those limits apply to metadata/legacy JSON, not to the total ZIP size.
 

@@ -90,7 +90,8 @@ actor BackupArchiveWriter {
         guard let archive else { throw BackupError.invalidArchive }
         try archive.addEntry(with: path, type: .file, uncompressedSize: Int64(data.count), bufferSize: 262_144) { position, count in
             try Task.checkCancellation()
-            return data.subdata(in: Int(position)..<(Int(position) + count))
+            let start = data.startIndex + Int(position)
+            return data.subdata(in: start..<(start + count))
         }
     }
 }
@@ -123,18 +124,26 @@ nonisolated enum BackupArchiveReader {
             let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
             // Legacy v1 JSON can contain original image bytes as base64.
             guard size <= 512 * 1_024 * 1_024 else { throw BackupError.invalidEntriesJSON }
-            let payload = try decode(Data(contentsOf: url, options: .mappedIfSafe))
+            var payload = try decode(Data(contentsOf: url, options: .mappedIfSafe))
+            var report = LegacyRestoreReport()
+            if isLegacy(payload) { (payload, report, _) = try normalizeLegacy(payload, archive: nil) }
             try validateMetadata(payload)
             for entry in payload.entries {
                 let name = entry.dayKey ?? entry.day.description
                 guard let data = entry.legacyImageData else { throw BackupError.damagedPhoto(name) }
                 try verifyDecodablePhoto(CGImageSourceCreateWithData(data as CFData, nil), name: name)
             }
-            return BackupContents(payload: payload)
+            var result = BackupContents(payload: payload)
+            result.legacyReport = report
+            return result
         }
         let archive = try Archive(url: url, accessMode: .read)
-        try validateArchivePaths(archive)
-        let payload = try readPayload(archive)
+        var payload = try readPayload(archive)
+        let legacy = isLegacy(payload)
+        try validateArchivePaths(archive, allowsRepeatedImagePaths: legacy)
+        var report = LegacyRestoreReport()
+        var legacySources: [String: Entry] = [:]
+        if legacy { (payload, report, legacySources) = try normalizeLegacy(payload, archive: archive) }
         try validateMetadata(payload)
         let directory = try makeWorkingDirectory(prefix: "import")
         do {
@@ -146,7 +155,8 @@ nonisolated enum BackupArchiveReader {
                     try verifyDecodablePhoto(CGImageSourceCreateWithData(data as CFData, nil), name: metadata.day.description)
                     continue
                 }
-                guard isSafeFilename(filename), let photo = archive["images/" + filename], photo.type == .file else {
+                guard isSafeFilename(filename), let photo = legacy ? legacySources[filename] : archive["images/" + filename],
+                      photo.type == .file else {
                     throw BackupError.damagedPhoto(filename)
                 }
                 guard photo.uncompressedSize <= UInt64(Int64.max) else { throw BackupError.invalidArchive }
@@ -166,6 +176,7 @@ nonisolated enum BackupArchiveReader {
             }
             var result = BackupContents(payload: payload)
             result.workingDirectory = directory
+            result.legacyReport = report
             return result
         } catch {
             try? FileManager.default.removeItem(at: directory)
@@ -241,13 +252,86 @@ nonisolated enum BackupArchiveReader {
         return try decode(data)
     }
 
-    private static func validateArchivePaths(_ archive: Archive) throws {
+    private static func validateArchivePaths(_ archive: Archive, allowsRepeatedImagePaths: Bool = false) throws {
         var paths = Set<String>()
         for entry in archive {
-            guard paths.insert(entry.path).inserted, !entry.path.hasPrefix("/"),
+            // The v2 writer named photos after entry IDs, so a library with a
+            // duplicated ID wrote the same images/ path twice. Those are
+            // matched to records by position in normalizeLegacy.
+            let repeatable = allowsRepeatedImagePaths && entry.path.hasPrefix("images/")
+            guard paths.insert(entry.path).inserted || repeatable, !entry.path.hasPrefix("/"),
                   !entry.path.contains("\\"), !entry.path.split(separator: "/").contains(".."),
                   entry.type != .symlink else { throw BackupError.invalidArchive }
         }
+    }
+
+    private static func isLegacy(_ payload: DaymarkBackupPayload) -> Bool {
+        (1...2).contains(payload.version)
+    }
+
+    /// v1/v2 backups were written without validation, from libraries that
+    /// could hold duplicate days (sync duplicates), duplicate IDs, and records
+    /// whose photo had not arrived yet. The old importer tolerated all three.
+    /// Rejecting the whole file left no way to restore it, so records without
+    /// a photo are dropped, same-day records are merged into one, and repeated
+    /// IDs are given fresh identities. v3 archives stay strictly validated.
+    static func normalizeLegacy(
+        _ payload: DaymarkBackupPayload, archive: Archive?
+    ) throws -> (DaymarkBackupPayload, LegacyRestoreReport, [String: Entry]) {
+        var report = LegacyRestoreReport()
+        var queues: [String: [Entry]] = [:]
+        if let archive {
+            for entry in archive where entry.type == .file && entry.path.hasPrefix("images/") {
+                queues[String(entry.path.dropFirst("images/".count)), default: []].append(entry)
+            }
+        }
+        var sources: [String: Entry] = [:]
+        var kept: [DaymarkBackupEntry] = []
+        var indexByDay: [Date: Int] = [:]
+        for (index, original) in payload.entries.enumerated() {
+            var entry = original
+            if archive != nil, let filename = entry.imageFilename {
+                // Repeated paths are stored in record order; extra references
+                // reuse the last copy, as the old importer did.
+                guard isSafeFilename(filename), var queue = queues[filename], let photo = queue.first else {
+                    throw BackupError.damagedPhoto(filename)
+                }
+                if queue.count > 1 { queue.removeFirst(); queues[filename] = queue }
+                let staged = sources[filename] == nil ? filename : String(format: "%08d-", index + 1) + filename
+                sources[staged] = photo
+                entry.imageFilename = staged
+            } else if archive == nil {
+                entry.imageFilename = nil // v1 JSON embeds the photo; old names are not files here.
+            }
+            guard entry.imageFilename != nil || entry.legacyImageData != nil else {
+                report.entriesWithoutPhoto += 1
+                continue
+            }
+            let day = try BackupCalendar.restoredDay(entry)
+            if let existing = indexByDay[day] {
+                report.duplicateDaysMerged += 1
+                let current = kept[existing]
+                // Later records win ties, matching the old importer's overwrite.
+                kept[existing] = legacyScore(current) > legacyScore(entry)
+                    ? current.fillingMissingValues(from: entry)
+                    : entry.fillingMissingValues(from: current)
+            } else {
+                indexByDay[day] = kept.count
+                kept.append(entry)
+            }
+        }
+        var ids = Set<String>()
+        for index in kept.indices {
+            if let id = kept[index].id, !ids.insert(id).inserted { kept[index] = kept[index].withID(nil) }
+        }
+        let referenced = Set(kept.compactMap(\.imageFilename))
+        sources = sources.filter { referenced.contains($0.key) }
+        return (DaymarkBackupPayload(version: payload.version, exportedAt: payload.exportedAt, entries: kept), report, sources)
+    }
+
+    private static func legacyScore(_ entry: DaymarkBackupEntry) -> Int {
+        [entry.caption?.isEmpty == false, entry.latitude != nil && entry.longitude != nil,
+         entry.countryCode != nil, entry.city != nil, entry.captureDate != nil].filter { $0 }.count
     }
 
     static func isSafeFilename(_ name: String) -> Bool {
@@ -280,6 +364,14 @@ nonisolated enum BackupArchiveReader {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                               attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
         return directory
+    }
+
+    /// Export and import stage whole libraries in tmp. If the app is killed
+    /// mid-operation nothing removes them, so clear leftovers at launch,
+    /// before any backup operation can be running.
+    static func removeStaleWorkingDirectories() {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("DaymarkBackups", isDirectory: true)
+        try? FileManager.default.removeItem(at: root)
     }
 
     static func checkSpace(required: Int64, at url: URL) throws {
@@ -318,4 +410,47 @@ nonisolated enum BackupArchiveReader {
 nonisolated struct BackupImportSummary: Sendable {
     let imported: Int
     let skipped: Int
+}
+
+nonisolated struct LegacyRestoreReport: Sendable, Equatable {
+    var entriesWithoutPhoto = 0
+    var duplicateDaysMerged = 0
+}
+
+nonisolated extension DaymarkBackupEntry {
+    /// Keeps this record's photo, day and time zone; fills absent details
+    /// from another record for the same day.
+    func fillingMissingValues(from other: DaymarkBackupEntry) -> DaymarkBackupEntry {
+        let hasLocation = latitude != nil && longitude != nil
+        let hasCountry = countryCode != nil
+        var merged = DaymarkBackupEntry(
+            id: id ?? other.id, day: day, captureDate: captureDate ?? other.captureDate,
+            imageFilename: imageFilename,
+            latitude: hasLocation ? latitude : other.latitude ?? latitude,
+            longitude: hasLocation ? longitude : other.longitude ?? longitude,
+            timezone: timezone,
+            countryCode: hasCountry ? countryCode : other.countryCode,
+            countryName: hasCountry ? countryName : other.countryName ?? countryName,
+            city: city ?? other.city,
+            caption: caption?.isEmpty == false ? caption : other.caption ?? caption
+        )
+        merged.legacyImageData = legacyImageData
+        merged.imageByteCount = imageByteCount
+        merged.imageSHA256 = imageSHA256
+        merged.dayKey = dayKey
+        return merged
+    }
+
+    func withID(_ newID: String?) -> DaymarkBackupEntry {
+        var copy = DaymarkBackupEntry(
+            id: newID, day: day, captureDate: captureDate, imageFilename: imageFilename,
+            latitude: latitude, longitude: longitude, timezone: timezone,
+            countryCode: countryCode, countryName: countryName, city: city, caption: caption
+        )
+        copy.legacyImageData = legacyImageData
+        copy.imageByteCount = imageByteCount
+        copy.imageSHA256 = imageSHA256
+        copy.dayKey = dayKey
+        return copy
+    }
 }

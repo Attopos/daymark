@@ -19,8 +19,8 @@ struct ContentView: View {
                 MapView()
             }
 
-            Tab("Timeline", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90") {
-                TimelineView()
+            Tab("Daily", systemImage: "rectangle.stack") {
+                DeskCalendarView()
             }
 
             Tab("Settings", systemImage: "gearshape") {

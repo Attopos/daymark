@@ -9,50 +9,43 @@ struct CalendarView: View {
     @Query(sort: \PhotoEntry.day, order: .reverse) private var entries: [PhotoEntry]
 
     private let photoStore = PhotoStore()
-    @State private var selectedItem: PhotosPickerItem?
     @State private var errorMessage: String?
     @State private var showingAddSheet = false
     @State private var addSheetDate = Date()
     @State private var addSheetPhotoItem: PhotosPickerItem?
     @State private var displayedMonth = Calendar.current.startOfMonth(for: Date())
-    @State private var showPastDays = false
-    @State private var pastDaysMonthCount = 12
-    @State private var pastDaysSelectedDate = Date()
-    @State private var pastDaysPhotoItem: PhotosPickerItem?
+    @State private var pieceSelectedDate = Date()
+    @State private var piecePhotoItem: PhotosPickerItem?
     @State private var pendingLocationImport: PendingPhotoImport?
-    @State private var gridColumnCount = 3
-    @State private var pinchStartingColumnCount: Int?
-    @ScaledMetric(relativeTo: .headline) private var tileDayFontSize: CGFloat = 16
-    @ScaledMetric(relativeTo: .caption2) private var tileMetadataFontSize: CGFloat = 10
 
     private let calendar = Calendar.current
-    private let gridColumnOptions = [2, 3, 5, 7]
 
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
-                let metrics = layoutMetrics(for: geometry.size.width, safeAreaInsets: geometry.safeAreaInsets)
+                let pageHeight = max(geometry.size.height, 1)
+                let entriesByMonth = entriesByMonthAndDay
 
-                if metrics.cellSize > 0 {
-                    ScrollView {
-                        if showPastDays {
-                            pastDaysGrid(metrics: metrics)
-                                .padding(.horizontal, metrics.horizontalPadding)
-                                .padding(.top, metrics.topPadding)
-                                .padding(.bottom, metrics.bottomPadding)
-                        } else {
-                            photoGrid(metrics: metrics)
-                                .padding(.horizontal, metrics.horizontalPadding)
-                                .padding(.top, metrics.topPadding)
-                                .padding(.bottom, metrics.bottomPadding)
+                // One month per screen; newest at the top, scroll down for earlier months.
+                ScrollView(.vertical) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(puzzleMonths, id: \.self) { month in
+                            MonthPuzzleView(
+                                month: month,
+                                entriesByDay: entriesByMonth[month] ?? [:],
+                                pickerSelection: pieceSelection(for:)
+                            )
+                            .frame(height: pageHeight)
                         }
                     }
-                    .simultaneousGesture(gridMagnificationGesture)
+                    .scrollTargetLayout()
                 }
+                .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+                .scrollIndicators(.hidden)
             }
             .background(DaymarkPalette.paper)
-            .daymarkNavigationTitle("Daymark")
-            .toolbarTitleDisplayMode(.inlineLarge)
+            .daymarkNavigationTitle("Daymark", inline: true)
+            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: PhotoEntry.self) { entry in
                 PhotoDetailView(entry: entry)
             }
@@ -70,27 +63,6 @@ struct CalendarView: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button {
-                            withAnimation {
-                                showPastDays.toggle()
-                                if showPastDays {
-                                    pastDaysMonthCount = 12
-                                }
-                            }
-                        } label: {
-                            Label(
-                                showPastDays ? "Show Daymarks" : "Show Past Days",
-                                systemImage: showPastDays ? "photo.on.rectangle" : "calendar"
-                            )
-                        }
-                    } label: {
-                        Image(systemName: "line.3.horizontal.decrease")
-                    }
-                    .accessibilityLabel("Filter")
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
                         SearchView(autoActivateSearch: true)
                     } label: {
@@ -104,14 +76,6 @@ struct CalendarView: View {
         .task(id: locationBackfillKey) {
             guard scenePhase == .active else { return }
             await photoStore.backfillLocationDetails(for: entries, in: modelContext)
-        }
-        .onChange(of: selectedItem) { _, newItem in
-            guard let newItem else { return }
-
-            Task {
-                await importPickedPhoto(newItem, for: Date())
-                selectedItem = nil
-            }
         }
         .alert("Photo Import Failed", isPresented: errorAlertBinding) {
             Button("OK", role: .cancel) { }
@@ -175,11 +139,11 @@ struct CalendarView: View {
                 addSheetPhotoItem = nil
             }
         }
-        .onChange(of: pastDaysPhotoItem) { _, newItem in
+        .onChange(of: piecePhotoItem) { _, newItem in
             guard let newItem else { return }
             Task {
-                await importPickedPhoto(newItem, for: pastDaysSelectedDate)
-                pastDaysPhotoItem = nil
+                await importPickedPhoto(newItem, for: pieceSelectedDate)
+                piecePhotoItem = nil
             }
         }
     }
@@ -291,256 +255,50 @@ struct CalendarView: View {
         .padding(.vertical, 8)
     }
 
-    private func photoGrid(metrics: LayoutMetrics) -> some View {
-        LazyVStack(alignment: .leading, spacing: 16) {
-            ForEach(photoGridMonths, id: \.self) { month in
-                Section {
-                    LazyVGrid(columns: columns(for: metrics), spacing: metrics.gridSpacing) {
-                        if canCreateTodayMark && calendar.isDate(month, equalTo: Date(), toGranularity: .month) {
-                            addMarkTile(size: metrics.cellSize)
-                        }
-
-                        ForEach(photoGridItems(in: month)) { item in
-                            switch item {
-                            case .entry(let entry):
-                                NavigationLink(value: entry) {
-                                    photoTile(for: entry, size: metrics.cellSize)
-                                }
-                                .buttonStyle(.plain)
-
-                            case .gap(let id):
-                                gapTile(id: id, size: metrics.cellSize)
-                            }
-                        }
-                    }
-                } header: {
-                    Text(month.formatted(.dateTime.month(.wide).year()))
-                        .font(DaymarkTypography.sectionTitle)
-                        .padding(.top, 8)
-                }
-            }
-        }
-    }
-
-    private func gapTile(id: String, size: CGFloat) -> some View {
-        Text("...")
-            .font(.system(.title2, design: .serif, weight: .medium))
-            .foregroundStyle(DaymarkPalette.secondaryInk)
-            .frame(width: size, height: size)
-            .accessibilityLabel("More daymarks between visible dates")
-            .id(id)
-    }
-
-    private func photoGridItems(in month: Date) -> [PhotoGridItem] {
-        let monthEntries = entries(in: month)
-        guard monthEntries.count > 1 else {
-            return monthEntries.map(PhotoGridItem.entry)
-        }
-
-        var items: [PhotoGridItem] = []
-
-        for (index, entry) in monthEntries.enumerated() {
-            items.append(.entry(entry))
-
-            guard index < monthEntries.count - 1 else { continue }
-            let nextEntry = monthEntries[index + 1]
-            let dayGap = calendar.dateComponents(
-                [.day],
-                from: calendar.startOfDay(for: nextEntry.day),
-                to: calendar.startOfDay(for: entry.day)
-            ).day ?? 0
-
-            if dayGap > 1 {
-                items.append(.gap("\(entry.persistentModelID)-gap-\(nextEntry.persistentModelID)"))
-            }
-        }
-
-        return items
-    }
-
-    private func addMarkTile(size: CGFloat) -> some View {
-        let overlayScale = min(size / 120, 1)
-
-        return PhotosPicker(selection: $selectedItem, matching: .images) {
-            ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(DaymarkPalette.recessed)
-
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 0.75, dash: [4, 4]))
-                    .foregroundStyle(DaymarkPalette.accent.opacity(0.25))
-
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .top, spacing: 8 * overlayScale) {
-                        VStack(alignment: .leading, spacing: overlayScale) {
-                            Text("Today")
-                                .font(.system(size: tileDayFontSize * overlayScale, weight: .semibold, design: .serif))
-                                .foregroundStyle(DaymarkPalette.ink)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.5)
-                                .allowsTightening(true)
-
-                            Text("Create mark")
-                                .font(.system(size: tileMetadataFontSize * overlayScale, weight: .medium))
-                                .foregroundStyle(DaymarkPalette.secondaryInk)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.5)
-                        }
-
-                        Spacer(minLength: 0)
-                    }
-
-                    Spacer(minLength: 0)
-
-                    Image(systemName: "plus")
-                        .font(.system(size: 24 * overlayScale, weight: .regular))
-                        .foregroundStyle(DaymarkPalette.accent)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                }
-                .padding(8 * overlayScale)
-            }
-            .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func photoTile(for entry: PhotoEntry, size: CGFloat) -> some View {
-        MarkCard(
-            entry: entry,
-            dayText: dayLabel(for: entry.day),
-            subtitleText: nil,
-            flagEmoji: entry.flagEmoji,
-            size: size
-        )
-    }
-
-    private var entryMonths: [Date] {
-        entries.reduce(into: [Date]()) { months, entry in
-            let month = calendar.startOfMonth(for: entry.day)
-            if !months.contains(month) {
-                months.append(month)
-            }
-        }
-    }
-
-    private var photoGridMonths: [Date] {
+    /// Every month from the earliest daymark through the current month, newest
+    /// first. Months without any mark still get a (blank) puzzle.
+    private var puzzleMonths: [Date] {
         let currentMonth = calendar.startOfMonth(for: Date())
-        guard canCreateTodayMark, !entryMonths.contains(currentMonth) else {
-            return entryMonths
+        let newest = entries.first.map { calendar.startOfMonth(for: $0.day) } ?? currentMonth
+        let oldest = entries.last.map { calendar.startOfMonth(for: $0.day) } ?? currentMonth
+        var month = max(newest, currentMonth)
+        let end = min(oldest, currentMonth)
+        var months: [Date] = []
+        while month >= end {
+            months.append(month)
+            guard let previous = calendar.date(byAdding: .month, value: -1, to: month) else { break }
+            month = previous
         }
-
-        return [currentMonth] + entryMonths
+        return months
     }
 
-    private func entries(in month: Date) -> [PhotoEntry] {
-        entries.filter { calendar.isDate($0.day, equalTo: month, toGranularity: .month) }
-    }
-
-    private var pastMonths: [Date] {
-        (0..<pastDaysMonthCount).compactMap { offset in
-            calendar.date(byAdding: .month, value: -offset, to: calendar.startOfMonth(for: Date()))
-        }
-    }
-
-    private func pastDaysGrid(metrics: LayoutMetrics) -> some View {
-        LazyVStack(alignment: .leading, spacing: 16) {
-            ForEach(pastMonths, id: \.self) { month in
-                Section {
-                    LazyVGrid(columns: columns(for: metrics), spacing: metrics.gridSpacing) {
-                        ForEach(daysInMonth(month), id: \.self) { date in
-                            if let entry = entry(for: date) {
-                                NavigationLink(value: entry) {
-                                    photoTile(for: entry, size: metrics.cellSize)
-                                }
-                                .buttonStyle(.plain)
-                            } else {
-                                emptyDayTile(date: date, size: metrics.cellSize)
-                            }
-                        }
-                    }
-                } header: {
-                    Text(month.formatted(.dateTime.month(.wide).year()))
-                        .font(DaymarkTypography.sectionTitle)
-                        .padding(.top, 8)
-                }
+    /// Every entry keyed by month start, then day of month, in one pass over the
+    /// library. Filtering the whole library again for each month page was
+    /// quadratic in the number of months on screen.
+    private var entriesByMonthAndDay: [Date: [Int: PhotoEntry]] {
+        var result: [Date: [Int: PhotoEntry]] = [:]
+        for entry in entries {
+            let components = calendar.dateComponents([.year, .month, .day], from: entry.day)
+            guard let day = components.day,
+                  let month = calendar.date(from: DateComponents(year: components.year, month: components.month)) else {
+                continue
             }
-
-            Color.clear
-                .frame(height: 1)
-                .onAppear {
-                    pastDaysMonthCount += 12
-                }
+            // Entries are newest first; keep the first one for a day, as before.
+            if result[month]?[day] == nil {
+                result[month, default: [:]][day] = entry
+            }
         }
+        return result
     }
 
-    private func emptyDayTile(date: Date, size: CGFloat) -> some View {
-        let overlayScale = min(size / 120, 1)
-
-        return PhotosPicker(selection: Binding(
-            get: { pastDaysPhotoItem },
+    private func pieceSelection(for date: Date) -> Binding<PhotosPickerItem?> {
+        Binding(
+            get: { piecePhotoItem },
             set: { newItem in
-                pastDaysSelectedDate = date
-                pastDaysPhotoItem = newItem
+                pieceSelectedDate = date
+                piecePhotoItem = newItem
             }
-        ), matching: .images) {
-            ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(DaymarkPalette.recessed)
-
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 0.75, dash: [4, 4]))
-                    .foregroundStyle(DaymarkPalette.accent.opacity(0.25))
-
-                VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: overlayScale) {
-                        Text(dayLabel(for: date))
-                            .font(.system(size: tileDayFontSize * overlayScale, weight: .semibold, design: .serif))
-                            .foregroundStyle(DaymarkPalette.ink)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.5)
-                            .allowsTightening(true)
-
-                        Text(monthLabel(for: date))
-                            .font(.system(size: tileMetadataFontSize * overlayScale, weight: .medium))
-                            .foregroundStyle(DaymarkPalette.secondaryInk)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.5)
-                    }
-
-                    Spacer(minLength: 0)
-
-                    Image(systemName: "plus")
-                        .font(.system(size: 20 * overlayScale, weight: .medium))
-                        .foregroundStyle(DaymarkPalette.accent)
-                        .frame(maxWidth: .infinity, alignment: .center)
-
-                    Spacer(minLength: 0)
-                }
-                .padding(8 * overlayScale)
-            }
-            .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func daysInMonth(_ month: Date) -> [Date] {
-        guard let range = calendar.range(of: .day, in: .month, for: month) else { return [] }
-        let today = calendar.startOfDay(for: Date())
-        return range.compactMap { dayNumber -> Date? in
-            var components = calendar.dateComponents([.year, .month], from: month)
-            components.day = dayNumber
-            guard let date = calendar.date(from: components) else { return nil }
-            let startOfDate = calendar.startOfDay(for: date)
-            return startOfDate <= today ? startOfDate : nil
-        }.reversed()
-    }
-
-    private func entry(for date: Date) -> PhotoEntry? {
-        entries.first(where: { calendar.isDate($0.day, inSameDayAs: date) })
+        )
     }
 
     private var errorAlertBinding: Binding<Bool> {
@@ -548,10 +306,6 @@ struct CalendarView: View {
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )
-    }
-
-    private var canCreateTodayMark: Bool {
-        !entries.contains(where: { calendar.isDateInToday($0.day) })
     }
 
     private var selectedDateHasEntry: Bool {
@@ -568,66 +322,20 @@ struct CalendarView: View {
 
     // New imports/cloud arrivals and returning to the app retry missing locations.
     // Exclude resolved names/codes so repairs do not restart their own task.
-    private var locationBackfillKey: String {
-        "\(scenePhase)-" + entries.map {
-            "\($0.id):\($0.latitude?.description ?? ""):\($0.longitude?.description ?? "")"
-        }.sorted().joined(separator: "|")
-    }
-
-    private func columns(for metrics: LayoutMetrics) -> [GridItem] {
-        Array(repeating: GridItem(.fixed(metrics.cellSize), spacing: metrics.gridSpacing), count: gridColumnCount)
-    }
-
-    private var gridMagnificationGesture: some Gesture {
-        MagnifyGesture()
-            .onChanged { value in
-                let startingCount = pinchStartingColumnCount ?? gridColumnCount
-                if pinchStartingColumnCount == nil {
-                    pinchStartingColumnCount = startingCount
-                }
-
-                let desiredCount = Double(startingCount) / max(Double(value.magnification), 0.1)
-                let nearestCount = gridColumnOptions.min { lhs, rhs in
-                    abs(log(Double(lhs) / desiredCount)) < abs(log(Double(rhs) / desiredCount))
-                } ?? startingCount
-
-                guard nearestCount != gridColumnCount else { return }
-                withAnimation(.snappy(duration: 0.18)) {
-                    gridColumnCount = nearestCount
-                }
-            }
-            .onEnded { _ in
-                pinchStartingColumnCount = nil
-            }
-    }
-
-    private func layoutMetrics(for width: CGFloat, safeAreaInsets: EdgeInsets) -> LayoutMetrics {
-        let horizontalPadding = 8.0
-        let gridSpacing = 2.0
-        let topPadding = 10.0
-        let bottomPadding = max(safeAreaInsets.bottom + 20, 28)
-        let safeWidth = width.isFinite ? max(width, 0) : 0
-        let totalGridSpacing = gridSpacing * Double(max(gridColumnCount - 1, 0))
-        let availableWidth = max(safeWidth - (horizontalPadding * 2) - totalGridSpacing, 0)
-        let cellSize = max(floor(availableWidth / Double(gridColumnCount)), 0)
-
-        return LayoutMetrics(
-            horizontalPadding: horizontalPadding,
-            gridSpacing: gridSpacing,
-            topPadding: topPadding,
-            bottomPadding: bottomPadding,
-            cellSize: cellSize
-        )
-    }
-
-    private func dayLabel(for date: Date) -> String {
-        if calendar.isDateInToday(date) { return "Today" }
-        if calendar.isDateInYesterday(date) { return "Yesterday" }
-        return date.formatted(.dateTime.day())
-    }
-
-    private func monthLabel(for date: Date) -> String {
-        date.formatted(.dateTime.month(.abbreviated).year())
+    // Order-independent hash (per-entry hashes are wrap-added), so the key is
+    // cheap to rebuild on every body pass instead of a big sorted string.
+    private var locationBackfillKey: Int {
+        var hasher = Hasher()
+        hasher.combine("\(scenePhase)")
+        var combined = hasher.finalize()
+        for entry in entries {
+            var hasher = Hasher()
+            hasher.combine(entry.id)
+            hasher.combine(entry.latitude)
+            hasher.combine(entry.longitude)
+            combined = combined &+ hasher.finalize()
+        }
+        return combined
     }
 
     private func hasEntry(on date: Date) -> Bool {
@@ -719,14 +427,6 @@ struct CalendarView: View {
     }
 }
 
-private struct LayoutMetrics {
-    let horizontalPadding: CGFloat
-    let gridSpacing: CGFloat
-    let topPadding: CGFloat
-    let bottomPadding: CGFloat
-    let cellSize: CGFloat
-}
-
 private struct CalendarDay: Identifiable {
     let id: Int
     let date: Date?
@@ -736,20 +436,6 @@ private struct PendingPhotoImport: Identifiable {
     let id = UUID()
     let data: Data
     let date: Date
-}
-
-private enum PhotoGridItem: Identifiable {
-    case entry(PhotoEntry)
-    case gap(String)
-
-    var id: String {
-        switch self {
-        case .entry(let entry):
-            return "entry-\(String(describing: entry.persistentModelID))"
-        case .gap(let id):
-            return "gap-\(id)"
-        }
-    }
 }
 
 private extension Calendar {

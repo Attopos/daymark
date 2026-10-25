@@ -19,6 +19,7 @@ struct PhotoDetailView: View {
     @State private var pendingReplacementImport: PendingPhotoReplacement?
     @State private var errorMessage: String?
     @State private var isDownloadingViewPhoto = false
+    @State private var displayImage: UIImage?
 
     var body: some View {
         ScrollView {
@@ -37,7 +38,7 @@ struct PhotoDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 16) {
-                    if photoStore.image(for: entry) != nil {
+                    if photoStore.originalData(for: entry) != nil {
                         Button {
                             showingPhotoEditor = true
                         } label: {
@@ -83,6 +84,12 @@ struct PhotoDetailView: View {
         }
         .task(id: entry.localViewPhotoFilename) {
             await downloadViewPhotoIfNeeded()
+        }
+        .task(id: CalendarPhotoLoader.identity(for: entry)) {
+            // Decode off the main thread so pushing this screen does not hitch.
+            if let image = await CalendarPhotoLoader.shared.image(for: entry, using: photoStore) {
+                displayImage = image
+            }
         }
         .sheet(isPresented: $showingPhotoEditor) {
             if let image = photoStore.image(for: entry) {
@@ -130,7 +137,7 @@ struct PhotoDetailView: View {
     private var photoSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Group {
-                if let image = photoStore.viewImage(for: entry) {
+                if let image = shownImage {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
@@ -163,6 +170,14 @@ struct PhotoDetailView: View {
                 }
             }
         }
+    }
+
+    /// The view photo the calendar may already have decoded, then the last one
+    /// this screen decoded, then the grid thumbnail while the full photo loads.
+    private var shownImage: UIImage? {
+        CalendarPhotoLoader.shared.cachedImage(for: CalendarPhotoLoader.identity(for: entry))
+            ?? displayImage
+            ?? ThumbnailImageLoader.shared.cachedImage(for: ThumbnailImageLoader.identity(for: entry))
     }
 
     private var viewPhotoStatusVisible: Bool {

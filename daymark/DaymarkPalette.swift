@@ -1,31 +1,53 @@
 import SwiftUI
 import UIKit
 
-/// Shared paper and ink tones. Photo overlays and semantic status colours stay separate.
+/// The six named swatches of the Daymark palette (MP088). Use the semantic
+/// tokens in `DaymarkPalette` for UI; reach for a swatch only when a view needs
+/// one exact palette colour, such as a gradient or a decorative surface.
+enum DaymarkSwatch {
+    static let heiSeBlack = hex(0x142030)
+    static let siestaTan = hex(0xE9D8C8)
+    static let picoEggplant = hex(0x732553)
+    static let stellarStrawberry = hex(0xFF5C8D)
+    static let blueWhale = hex(0x1E3442)
+    static let grauzone = hex(0x85A3B2)
+
+    static func hex(_ rgb: UInt32) -> Color {
+        Color(uiColor: DaymarkPalette.uiColor(rgb))
+    }
+}
+
+/// Shared paper and ink tones built from `DaymarkSwatch`. Light mode is warm
+/// Siesta Tan paper with Hēi Sè ink and an eggplant accent; dark mode is Hēi Sè
+/// paper with Blue Whale surfaces and a strawberry accent. Photo overlays and
+/// semantic status colours stay separate.
 enum DaymarkPalette {
     static let accent = Color("AccentColor")
+    /// A second, louder accent for highlights such as today or a completed month.
+    static let highlight = DaymarkSwatch.stellarStrawberry
     static let paper = Color(uiColor: paperUIColor)
-    static let surface = adaptive(light: 0xFFFDF7, dark: 0x202B23)
-    static let recessed = adaptive(light: 0xEEEEE4, dark: 0x18221C)
+    static let surface = adaptive(light: 0xFBF6F0, dark: 0x1E3442)
+    static let recessed = adaptive(light: 0xE9D8C8, dark: 0x192A39)
     static let ink = Color(uiColor: inkUIColor)
-    static let secondaryInk = adaptive(light: 0x646E61, dark: 0xA9B6A7)
-    static let rule = adaptive(light: 0xDCDDD0, dark: 0x3C4B40)
-    static let shadow = Color.black.opacity(0.035)
+    static let secondaryInk = adaptive(light: 0x4E6474, dark: 0x85A3B2)
+    static let rule = adaptive(light: 0xDCCAB9, dark: 0x2E4757)
+    static let shadow = DaymarkSwatch.heiSeBlack.opacity(0.06)
     // A light photo mount remains visible over both maps and photographs in either theme.
-    static let photoMount = Color(red: 0.99, green: 0.98, blue: 0.95)
+    static let photoMount = DaymarkSwatch.hex(0xFBF6F0)
 
-    static let paperUIColor = adaptiveUIColor(light: 0xF9F5ED, dark: 0x171F1A)
-    static let inkUIColor = adaptiveUIColor(light: 0x28372D, dark: 0xF2F0E7)
-    static let buttonFill = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.68, green: 0.79, blue: 0.70, alpha: 1)
-            : UIColor(red: 0.16, green: 0.31, blue: 0.24, alpha: 1)
-    })
-    static let buttonText = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.09, green: 0.15, blue: 0.11, alpha: 1)
-            : UIColor(red: 0.99, green: 0.98, blue: 0.94, alpha: 1)
-    })
+    static let paperUIColor = adaptiveUIColor(light: 0xF3E9DF, dark: 0x142030)
+    static let inkUIColor = adaptiveUIColor(light: 0x142030, dark: 0xE9D8C8)
+    static let buttonFill = adaptive(light: 0x732553, dark: 0xFF5C8D)
+    static let buttonText = adaptive(light: 0xF3E9DF, dark: 0x142030)
+
+    /// The palette's signature bloom: strawberry fading through eggplant into Blue Whale.
+    static var bloom: LinearGradient {
+        LinearGradient(
+            colors: [DaymarkSwatch.stellarStrawberry, DaymarkSwatch.picoEggplant, DaymarkSwatch.blueWhale],
+            startPoint: .topTrailing,
+            endPoint: .bottomLeading
+        )
+    }
 
     private static func adaptive(light: UInt32, dark: UInt32) -> Color {
         Color(uiColor: adaptiveUIColor(light: light, dark: dark))
@@ -33,14 +55,17 @@ enum DaymarkPalette {
 
     private static func adaptiveUIColor(light: UInt32, dark: UInt32) -> UIColor {
         UIColor { traits in
-            let rgb = traits.userInterfaceStyle == .dark ? dark : light
-            return UIColor(
-                red: CGFloat((rgb >> 16) & 0xFF) / 255,
-                green: CGFloat((rgb >> 8) & 0xFF) / 255,
-                blue: CGFloat(rgb & 0xFF) / 255,
-                alpha: 1
-            )
+            uiColor(traits.userInterfaceStyle == .dark ? dark : light)
         }
+    }
+
+    fileprivate static func uiColor(_ rgb: UInt32) -> UIColor {
+        UIColor(
+            red: CGFloat((rgb >> 16) & 0xFF) / 255,
+            green: CGFloat((rgb >> 8) & 0xFF) / 255,
+            blue: CGFloat(rgb & 0xFF) / 255,
+            alpha: 1
+        )
     }
 }
 
