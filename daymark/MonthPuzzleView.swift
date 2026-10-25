@@ -4,6 +4,8 @@ import SwiftUI
 /// Regular grid cut of one month into day pieces that fills a fixed board.
 /// Leading leftover cells of the first row merge into a single title piece,
 /// so every cell of the board is used and the board stays a clean rectangle.
+/// Days run newest first: the last day of the month follows the title and
+/// the 1st closes the board, matching the reverse-chronological feed.
 struct MonthPuzzleLayout {
     let dayCount: Int
     let columns: Int
@@ -48,7 +50,7 @@ struct MonthPuzzleLayout {
 
     /// Frame of a 1-based day in board coordinates.
     func rect(forDay day: Int) -> CGRect {
-        let index = titleSpan + day - 1
+        let index = titleSpan + dayCount - day
         let column = index % columns
         let row = index / columns
         return CGRect(
@@ -124,7 +126,11 @@ struct MonthPuzzleView: View {
                 photoPiece(entry: entry, day: day, size: rect.size)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(entry.day.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+            .accessibilityLabel(
+                [entry.day.formatted(.dateTime.weekday(.wide).month(.wide).day().year()), entry.countryName]
+                    .compactMap { $0 }
+                    .joined(separator: ", ")
+            )
         } else if date <= calendar.startOfDay(for: Date()) {
             PhotosPicker(selection: pickerSelection(date), matching: .images) {
                 blankPiece(day: day, date: date, rect: rect, layout: layout)
@@ -150,7 +156,26 @@ struct MonthPuzzleView: View {
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.45), radius: 2, x: 0, y: 1)
                 .padding(5)
+
+            if let flagEmoji = entry.flagEmoji {
+                flagBadge(flagEmoji, pieceSize: size)
+                    .padding(4)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            }
         }
+    }
+
+    /// Same mounted-flag icon as `MarkCard`, scaled to the piece.
+    private func flagBadge(_ flagEmoji: String, pieceSize: CGSize) -> some View {
+        let diameter = min(max(min(pieceSize.width, pieceSize.height) * 0.26, 16), 26)
+
+        return Text(flagEmoji)
+            .font(.system(size: diameter * 0.55))
+            .frame(width: diameter, height: diameter)
+            .background(DaymarkPalette.photoMount, in: Circle())
+            .shadow(color: .black.opacity(0.2), radius: 1.5, x: 0, y: 1)
+            .fixedSize()
+            .accessibilityHidden(true)
     }
 
     private func blankPiece(day: Int, date: Date, rect: CGRect, layout: MonthPuzzleLayout) -> some View {
