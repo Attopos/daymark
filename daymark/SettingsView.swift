@@ -55,7 +55,8 @@ struct SettingsView: View {
                 }
             }
             .onDisappear {
-                backupTask?.cancel()
+                // Switching tabs must not abort a running export or restore;
+                // the tab keeps its state and the Cancel button stays available.
                 pendingBackup?.cleanUp()
                 pendingBackup = nil
             }
@@ -338,7 +339,14 @@ struct SettingsView: View {
         if let first = days.first, let last = days.last {
             range = "\(first.formatted(date: .abbreviated, time: .omitted)) – \(last.formatted(date: .abbreviated, time: .omitted)). "
         } else { range = "" }
-        return "\(backup.payload.entries.count) photos verified. " + range +
+        var legacyNote = ""
+        if backup.legacyReport.duplicateDaysMerged > 0 {
+            legacyNote += "\(backup.legacyReport.duplicateDaysMerged) duplicate records for the same day were combined. "
+        }
+        if backup.legacyReport.entriesWithoutPhoto > 0 {
+            legacyNote += "\(backup.legacyReport.entriesWithoutPhoto) records without a photo will be skipped. "
+        }
+        return "\(backup.payload.entries.count) photos verified. " + range + legacyNote +
             "\(conflicts) days already have a photo. Merge skips these days; Overwrite replaces only those days."
     }
 

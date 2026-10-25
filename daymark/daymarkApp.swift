@@ -10,6 +10,7 @@ struct DaymarkApp: App {
     @AppStorage("prefersDarkMode") private var prefersDarkMode = false
 
     init() {
+        BackupArchiveReader.removeStaleWorkingDirectories()
         let authManager = AuthManager()
         _authManager = State(initialValue: authManager)
         _dataController = State(

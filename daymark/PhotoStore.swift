@@ -18,6 +18,7 @@ nonisolated struct BackupContents: Sendable {
     fileprivate let archiveData: Data?
     fileprivate let imageRanges: [String: Range<Int>]
     var workingDirectory: URL? = nil
+    var legacyReport = LegacyRestoreReport()
 
     init(
         payload: DaymarkBackupPayload,
