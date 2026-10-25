@@ -34,9 +34,6 @@ struct CalendarView: View {
                                 entriesByDay: entriesByDay(in: month),
                                 pickerSelection: pieceSelection(for:)
                             )
-                            .padding(.horizontal, 10)
-                            .padding(.top, 6)
-                            .padding(.bottom, 12)
                             .frame(height: pageHeight)
                         }
                     }
