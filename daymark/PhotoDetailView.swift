@@ -80,6 +80,7 @@ struct PhotoDetailView: View {
             Text(errorMessage ?? "Something went wrong.")
         }
         .task {
+            await backfillPlaceIfNeeded()
             await locationLocalizer.localize(entry)
         }
         .task(id: entry.localViewPhotoFilename) {
@@ -226,16 +227,15 @@ struct PhotoDetailView: View {
 
     private var metadataSection: some View {
         HStack {
-            if let city = locationLocalizer.localizedCity(for: entry), let countryCode = entry.countryCode {
-                let flag = entry.flagEmoji ?? ""
-                metadataRow(icon: "location", title: "Location", value: "\(flag) \(city), \(countryCode)")
-            } else if let city = locationLocalizer.localizedCity(for: entry) {
-                metadataRow(icon: "location", title: "Location", value: city)
-            } else if entry.latitude != nil, entry.longitude != nil {
+            let city = locationLocalizer.localizedCity(for: entry)
+            let countryName = locationLocalizer.localizedCountryName(for: entry)
+            if let place = city ?? countryName {
+                metadataRow(flag: entry.flagEmoji, title: "Location", value: place)
+            } else if let lat = entry.latitude, let lon = entry.longitude {
                 metadataRow(
-                    icon: "location",
+                    flag: entry.flagEmoji,
                     title: "Coordinates",
-                    value: formatCoordinates(lat: entry.latitude!, lon: entry.longitude!)
+                    value: formatCoordinates(lat: lat, lon: lon)
                 )
             }
 
@@ -272,12 +272,19 @@ struct PhotoDetailView: View {
         .tint(.red)
     }
 
-    private func metadataRow(icon: String, title: String, value: String) -> some View {
+    private func metadataRow(flag: String?, title: String, value: String) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(DaymarkPalette.secondaryInk)
-                .frame(width: 20)
+            Group {
+                if let flag {
+                    Text(flag)
+                        .font(.system(size: 20))
+                } else {
+                    Image(systemName: "location")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+            }
+            .foregroundStyle(DaymarkPalette.secondaryInk)
+            .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
@@ -291,6 +298,37 @@ struct PhotoDetailView: View {
 
     private func formatCoordinates(lat: Double, lon: Double) -> String {
         String(format: "%.4f, %.4f", lat, lon)
+    }
+
+    /// Older entries and photos imported offline can carry coordinates without
+    /// a resolved place. Resolve them once and store the result so the row (and
+    /// the calendar flag) show a country and city instead of raw coordinates.
+    @MainActor
+    private func backfillPlaceIfNeeded() async {
+        guard let lat = entry.latitude, let lon = entry.longitude,
+              entry.city == nil || entry.countryCode == nil else { return }
+
+        let details = await LocationGeocoder.reverseGeocode(
+            latitude: lat,
+            longitude: lon,
+            preferredLocale: Locale(identifier: "en")
+        )
+        guard !Task.isCancelled,
+              entry.latitude == lat, entry.longitude == lon else { return }
+
+        var changed = false
+        if entry.city == nil, let city = details.city {
+            entry.city = city
+            changed = true
+        }
+        if entry.countryCode == nil, let code = details.countryCode {
+            entry.countryCode = code
+            entry.countryName = entry.countryName ?? details.countryName
+            changed = true
+        }
+        guard changed else { return }
+        entry.metadataSyncState = .localOnly
+        try? modelContext.save()
     }
 
     @MainActor
