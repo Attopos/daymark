@@ -44,7 +44,9 @@ final class daymarkUITests: XCTestCase {
     @MainActor
     func testMapOpensAndTogglesSatellite() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-hasCompletedWelcome", "YES", "-mapShowsSatellite", "NO"]
+        // No -mapShowsSatellite launch argument: the argument domain outranks
+        // the app's own writes, so the toggle could never read its new value.
+        app.launchArguments = ["-hasCompletedWelcome", "YES"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             for label in ["Don’t Allow", "Don't Allow", "OK"] where alert.buttons[label].exists {
                 alert.buttons[label].tap()
@@ -59,6 +61,13 @@ final class daymarkUITests: XCTestCase {
         XCTAssertTrue(toggle.waitForExistence(timeout: 10))
         if app.alerts["Location Access Needed"].exists {
             app.alerts["Location Access Needed"].buttons["OK"].tap()
+        }
+        // A previous run may have left the map on satellite; start from standard.
+        if toggle.label == "Show Standard Map" {
+            toggle.tap()
+            let predicate = NSPredicate(format: "label == %@", "Show Satellite Map")
+            expectation(for: predicate, evaluatedWith: toggle)
+            waitForExpectations(timeout: 5)
         }
 
         for (expected, name) in [("Show Standard Map", "satellite"), ("Show Satellite Map", "standard")] {
