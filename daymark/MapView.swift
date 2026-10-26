@@ -54,6 +54,10 @@ struct MapView: View {
             .mapStyle(showsSatellite
                 ? .hybrid(elevation: .flat)
                 : .standard(elevation: .realistic))
+            // MapKit otherwise clamps programmatic cameras near 19,900 km, too
+            // close for photos more than ~90° of longitude apart to share a
+            // portrait screen.
+            .mapCameraBounds(MapCameraBounds(maximumDistance: 40_000_000))
             .mapControls {
                 MapUserLocationButton(scope: mapScope)
                     .accessibilityLabel("Show Current Location")
