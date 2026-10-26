@@ -10,6 +10,7 @@ struct MapView: View {
     @StateObject private var locationManager = DaymarkLocationManager()
     @State private var visibleRegion: MKCoordinateRegion?
     @State private var clusters: [MapCluster] = []
+    @AppStorage("mapShowsSatellite") private var showsSatellite = false
     // One camera path instead of three: follow the user once location is
     // available, otherwise frame the photos. Setting `.automatic` on every
     // appear and then jumping to a GPS fix made MapKit reload tiles twice.
@@ -38,7 +39,12 @@ struct MapView: View {
                 visibleRegion = context.region
                 refreshClusters()
             }
-            .mapStyle(.standard(elevation: .realistic))
+            // Swapping only the style keeps the same Map and annotations alive.
+            // Satellite stays flat: realistic elevation on imagery streams 3D
+            // mesh tiles, which is the heaviest thing MapKit can draw.
+            .mapStyle(showsSatellite
+                ? .hybrid(elevation: .flat)
+                : .standard(elevation: .realistic))
             .mapControls {
                 MapUserLocationButton(scope: mapScope)
                     .accessibilityLabel("Show Current Location")
@@ -49,6 +55,16 @@ struct MapView: View {
             .daymarkScreen()
             .daymarkNavigationTitle("Maps")
             .toolbarTitleDisplayMode(.inlineLarge)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showsSatellite.toggle()
+                    } label: {
+                        Image(systemName: showsSatellite ? "map" : "globe.americas")
+                    }
+                    .accessibilityLabel(showsSatellite ? "Show Standard Map" : "Show Satellite Map")
+                }
+            }
             .onAppear {
                 locationManager.requestAuthorizationIfNeeded()
                 refreshClusters()
