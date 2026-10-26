@@ -64,15 +64,22 @@ struct MapView: View {
             .daymarkScreen()
             .daymarkNavigationTitle("Maps")
             .toolbarTitleDisplayMode(.inlineLarge)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showsSatellite.toggle()
-                    } label: {
-                        Image(systemName: showsSatellite ? "map" : "globe.americas")
-                    }
-                    .accessibilityLabel(showsSatellite ? "Show Standard Map" : "Show Satellite Map")
+            // On the map itself rather than in the nav bar: a toolbar button
+            // floating over the Map never received its tap.
+            .overlay(alignment: .bottomTrailing) {
+                Button {
+                    showsSatellite.toggle()
+                } label: {
+                    Image(systemName: showsSatellite ? "map" : "globe.americas")
+                        .font(.system(size: 17, weight: .medium))
+                        .frame(width: 44, height: 44)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
                 }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("mapStyleToggle")
+                .accessibilityLabel(showsSatellite ? "Show Standard Map" : "Show Satellite Map")
+                .padding(16)
             }
             .onAppear {
                 locationManager.requestAuthorizationIfNeeded()
@@ -116,7 +123,31 @@ struct MapView: View {
         hasFramedPhotos = true
         position = .userLocation(
             followsHeading: false,
-            fallback: .region(boundingRegion(of: located))
+            fallback: .rect(framingRect(of: located))
+        )
+    }
+
+    /// The photos' bounding box in Mercator map points, so high latitudes
+    /// aren't cut off the way a degree-based region is. Padded generously,
+    /// with extra room on top because annotations hang above their pin.
+    private func framingRect(of pins: [MapPin]) -> MKMapRect {
+        let points = pins.map { MKMapPoint($0.coordinate) }
+        let minX = points.map(\.x).min() ?? 0
+        let maxX = points.map(\.x).max() ?? 0
+        let minY = points.map(\.y).min() ?? 0
+        let maxY = points.map(\.y).max() ?? 0
+        // Roughly 1 km at mid-latitudes, so a single photo isn't framed at
+        // maximum zoom.
+        let width = max(maxX - minX, 8_000)
+        let height = max(maxY - minY, 8_000)
+        let padX = width * 0.35
+        let padTop = height * 0.5
+        let padBottom = height * 0.3
+        return MKMapRect(
+            x: (minX + maxX) / 2 - width / 2 - padX,
+            y: (minY + maxY) / 2 - height / 2 - padTop,
+            width: width + padX * 2,
+            height: height + padTop + padBottom
         )
     }
 
