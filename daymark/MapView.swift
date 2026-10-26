@@ -123,32 +123,54 @@ struct MapView: View {
         hasFramedPhotos = true
         position = .userLocation(
             followsHeading: false,
-            fallback: .rect(framingRect(of: located))
+            fallback: .camera(framingCamera(of: located))
         )
     }
 
-    /// The photos' bounding box in Mercator map points, so high latitudes
-    /// aren't cut off the way a degree-based region is. Padded generously,
-    /// with extra room on top because annotations hang above their pin.
-    private func framingRect(of pins: [MapPin]) -> MKMapRect {
-        let points = pins.map { MKMapPoint($0.coordinate) }
-        let minX = points.map(\.x).min() ?? 0
-        let maxX = points.map(\.x).max() ?? 0
-        let minY = points.map(\.y).min() ?? 0
-        let maxY = points.map(\.y).max() ?? 0
-        // Roughly 1 km at mid-latitudes, so a single photo isn't framed at
-        // maximum zoom.
-        let width = max(maxX - minX, 8_000)
-        let height = max(maxY - minY, 8_000)
-        let padX = width * 0.35
-        let padTop = height * 0.5
-        let padBottom = height * 0.3
-        return MKMapRect(
-            x: (minX + maxX) / 2 - width / 2 - padX,
-            y: (minY + maxY) / 2 - height / 2 - padTop,
-            width: width + padX * 2,
-            height: height + padTop + padBottom
+    /// A camera that keeps every photo on screen. The realistic map style
+    /// renders zoomed-out views as a globe, where a flat bounding box (degree
+    /// region or Mercator rect) frames far too close and pushes distant photos
+    /// over the horizon. So this works on the sphere: aim at the photos'
+    /// spherical centroid and back off until the farthest one fits inside a
+    /// conservative portrait field of view.
+    private func framingCamera(of pins: [MapPin]) -> MapCamera {
+        func unitVector(_ pin: MapPin) -> (x: Double, y: Double, z: Double) {
+            let lat = pin.latitude * .pi / 180
+            let lon = pin.longitude * .pi / 180
+            return (cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))
+        }
+
+        let vectors = pins.map(unitVector)
+        var x = vectors.reduce(0) { $0 + $1.x }
+        var y = vectors.reduce(0) { $0 + $1.y }
+        var z = vectors.reduce(0) { $0 + $1.z }
+        let length = (x * x + y * y + z * z).squareRoot()
+        if length > 1e-9 {
+            x /= length; y /= length; z /= length
+        } else {
+            // Photos on opposite sides of the planet: any center will do.
+            x = vectors[0].x; y = vectors[0].y; z = vectors[0].z
+        }
+        let center = CLLocationCoordinate2D(
+            latitude: atan2(z, (x * x + y * y).squareRoot()) * 180 / .pi,
+            longitude: atan2(y, x) * 180 / .pi
         )
+
+        // Largest angle (radians) between the center and any photo, padded so
+        // annotations, which hang above their pin, clear the screen edges.
+        let farthest = vectors
+            .map { acos(min(max($0.x * x + $0.y * y + $0.z * z, -1), 1)) }
+            .max() ?? 0
+        let angle = min(farthest * 1.3 + 0.0002, .pi / 2.2)
+
+        // Distance from the surface at which a point `angle` away sits within
+        // `halfFieldOfView` of the view axis.
+        let earthRadius = 6_371_000.0
+        let halfFieldOfView = 12.0 * .pi / 180
+        let distance = earthRadius * sin(angle) / tan(halfFieldOfView)
+            - earthRadius * (1 - cos(angle))
+
+        return MapCamera(centerCoordinate: center, distance: max(distance, 1_500))
     }
 
     private func refreshClusters() {
