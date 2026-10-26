@@ -12,11 +12,20 @@ struct MapView: View {
     @State private var clusters: [MapCluster] = []
     @AppStorage("mapShowsSatellite") private var showsSatellite = false
     // One camera path instead of three: follow the user once location is
-    // available, otherwise frame the photos. Setting `.automatic` on every
+    // available, otherwise show the photos. Setting `.automatic` on every
     // appear and then jumping to a GPS fix made MapKit reload tiles twice.
+    // The fallback must be a concrete region: `.automatic` re-frames whenever
+    // the annotations change, and re-clustering on every camera change then
+    // changes them again, looping forever.
     @State private var position: MapCameraPosition = .userLocation(
         followsHeading: false,
-        fallback: .automatic
+        fallback: .region(MapView.defaultRegion)
+    )
+    @State private var hasFramedPhotos = false
+
+    private static let defaultRegion = MKCoordinateRegion(
+        center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
+        span: MKCoordinateSpan(latitudeDelta: 0.2, longitudeDelta: 0.2)
     )
 
     var body: some View {
@@ -67,11 +76,13 @@ struct MapView: View {
             }
             .onAppear {
                 locationManager.requestAuthorizationIfNeeded()
+                framePhotosIfNeeded()
                 refreshClusters()
             }
             // Sync and backfill touch entries constantly; only re-cluster when
             // something the map actually draws (id, position, day) changed.
             .onChange(of: pinSignature) { _, _ in
+                framePhotosIfNeeded()
                 refreshClusters()
             }
             .alert("Location Access Needed", isPresented: locationAccessAlertBinding) {
@@ -93,6 +104,20 @@ struct MapView: View {
             combined = combined &+ hasher.finalize()
         }
         return combined
+    }
+
+    /// Once per view lifetime, swap the default fallback for the photos'
+    /// bounding box so a user without location access still lands on their
+    /// photos. Later visits keep wherever the camera was left.
+    private func framePhotosIfNeeded() {
+        guard !hasFramedPhotos else { return }
+        let located = entries.compactMap(MapPin.init)
+        guard !located.isEmpty else { return }
+        hasFramedPhotos = true
+        position = .userLocation(
+            followsHeading: false,
+            fallback: .region(boundingRegion(of: located))
+        )
     }
 
     private func refreshClusters() {
