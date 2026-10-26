@@ -9,26 +9,22 @@ struct MapView: View {
     @Namespace private var mapScope
     @StateObject private var locationManager = DaymarkLocationManager()
     @State private var visibleRegion: MKCoordinateRegion?
+    @State private var clusters: [MapCluster] = []
+    // One camera path instead of three: follow the user once location is
+    // available, otherwise frame the photos. Setting `.automatic` on every
+    // appear and then jumping to a GPS fix made MapKit reload tiles twice.
     @State private var position: MapCameraPosition = .userLocation(
         followsHeading: false,
-        fallback: .region(
-            MKCoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
-                span: MKCoordinateSpan(latitudeDelta: 0.2, longitudeDelta: 0.2)
-            )
-        )
+        fallback: .automatic
     )
+
     var body: some View {
         NavigationStack {
             Map(position: $position, interactionModes: .all, scope: mapScope) {
                 UserAnnotation()
 
                 ForEach(clusters) { cluster in
-                    Annotation(
-                        daymarkTitle(for: cluster.representative),
-                        coordinate: cluster.coordinate,
-                        anchor: .bottom
-                    ) {
+                    Annotation(cluster.title, coordinate: cluster.coordinate, anchor: .bottom) {
                         if cluster.count == 1 {
                             PhotoMapAnnotation(entry: cluster.representative)
                         } else {
@@ -40,6 +36,7 @@ struct MapView: View {
             }
             .onMapCameraChange(frequency: .onEnd) { context in
                 visibleRegion = context.region
+                refreshClusters()
             }
             .mapStyle(.standard(elevation: .realistic))
             .mapControls {
@@ -54,13 +51,12 @@ struct MapView: View {
             .toolbarTitleDisplayMode(.inlineLarge)
             .onAppear {
                 locationManager.requestAuthorizationIfNeeded()
-                focusMapIfNeeded()
+                refreshClusters()
             }
-            .onChange(of: locatedEntries.count) { _, _ in
-                focusMapIfNeeded()
-            }
-            .onReceive(locationManager.$currentRegion.compactMap { $0 }) { region in
-                position = .region(region)
+            // Sync and backfill touch entries constantly; only re-cluster when
+            // something the map actually draws (id, position, day) changed.
+            .onChange(of: pinSignature) { _, _ in
+                refreshClusters()
             }
             .alert("Location Access Needed", isPresented: locationAccessAlertBinding) {
                 Button("OK", role: .cancel) { }
@@ -70,64 +66,88 @@ struct MapView: View {
         }
     }
 
-    private var locatedEntries: [PhotoEntry] {
-        entries.filter { $0.latitude != nil && $0.longitude != nil }
+    private var pinSignature: Int {
+        var combined = entries.count
+        for entry in entries {
+            var hasher = Hasher()
+            hasher.combine(entry.id)
+            hasher.combine(entry.latitude)
+            hasher.combine(entry.longitude)
+            hasher.combine(entry.day)
+            combined = combined &+ hasher.finalize()
+        }
+        return combined
+    }
+
+    private func refreshClusters() {
+        let located = entries.compactMap(MapPin.init)
+        guard !located.isEmpty else {
+            clusters = []
+            return
+        }
+
+        guard let region = visibleRegion else {
+            // Before the first camera update, cluster across all photos coarsely
+            // rather than dropping every individual pin onto the map.
+            clusters = Self.clusterize(located, region: boundingRegion(of: located))
+            return
+        }
+
+        let visible = located.filter { region.contains($0, marginFraction: 0.2) }
+        clusters = Self.clusterize(visible, region: region)
     }
 
     /// Photos bucketed into a grid sized to the current zoom, so the map never
     /// draws more than a few dozen annotations at once. Buckets outside the
     /// visible region are culled; each visible bucket renders one representative
     /// thumbnail (with a +N badge when it stands in for several photos).
-    private var clusters: [MapCluster] {
-        let located = locatedEntries
-        guard !located.isEmpty else { return [] }
-
-        guard let region = visibleRegion else {
-            // Before the first camera update, cluster across all photos coarsely
-            // rather than dropping every individual pin onto the map.
-            return Self.clusterize(located, region: boundingRegion(of: located))
-        }
-
-        let visible = located.filter { region.contains($0, marginFraction: 0.2) }
-        return Self.clusterize(visible, region: region)
-    }
-
     private static func clusterize(
-        _ entries: [PhotoEntry],
+        _ pins: [MapPin],
         region: MKCoordinateRegion
     ) -> [MapCluster] {
-        guard !entries.isEmpty else { return [] }
+        guard !pins.isEmpty else { return [] }
 
         // ~6 columns × ~12 rows of buckets across the visible region keeps cells
         // roughly one annotation-footprint apart, so pins don't visually overlap.
-        let latStep = max(region.span.latitudeDelta / 12, 1e-6)
-        let lonStep = max(region.span.longitudeDelta / 6, 1e-6)
+        // Steps snap to powers of two so panning and small zooms keep the same
+        // bucket ids, letting MapKit reuse annotations instead of rebuilding all.
+        let latStep = snappedStep(region.span.latitudeDelta / 12)
+        let lonStep = snappedStep(region.span.longitudeDelta / 6)
 
-        var buckets: [String: [PhotoEntry]] = [:]
-        for entry in entries {
-            guard let lat = entry.latitude, let lon = entry.longitude else { continue }
-            let row = (lat / latStep).rounded(.down)
-            let col = (lon / lonStep).rounded(.down)
-            buckets["\(row):\(col)", default: []].append(entry)
+        var buckets: [MapCluster.Key: (representative: MapPin, count: Int)] = [:]
+        for pin in pins {
+            let key = MapCluster.Key(
+                row: Int((pin.latitude / latStep).rounded(.down)),
+                col: Int((pin.longitude / lonStep).rounded(.down)),
+                latStep: latStep
+            )
+            if let existing = buckets[key] {
+                let newer = pin.day > existing.representative.day ? pin : existing.representative
+                buckets[key] = (newer, existing.count + 1)
+            } else {
+                buckets[key] = (pin, 1)
+            }
         }
 
-        return buckets.map { key, group in
-            let representative = group.max { $0.day < $1.day } ?? group[0]
-            return MapCluster(
+        return buckets.map { key, bucket in
+            MapCluster(
                 id: key,
-                coordinate: CLLocationCoordinate2D(
-                    latitude: representative.latitude ?? 0,
-                    longitude: representative.longitude ?? 0
-                ),
-                representative: representative,
-                count: group.count
+                coordinate: bucket.representative.coordinate,
+                representative: bucket.representative.entry,
+                title: bucket.representative.day.formatted(.dateTime.month(.abbreviated).day().year()),
+                count: bucket.count
             )
         }
     }
 
-    private func boundingRegion(of entries: [PhotoEntry]) -> MKCoordinateRegion {
-        let lats = entries.compactMap(\.latitude)
-        let lons = entries.compactMap(\.longitude)
+    private static func snappedStep(_ raw: Double) -> Double {
+        let clamped = max(raw, 1e-6)
+        return pow(2, log2(clamped).rounded())
+    }
+
+    private func boundingRegion(of pins: [MapPin]) -> MKCoordinateRegion {
+        let lats = pins.map(\.latitude)
+        let lons = pins.map(\.longitude)
         guard let minLat = lats.min(), let maxLat = lats.max(),
               let minLon = lons.min(), let maxLon = lons.max() else {
             return MKCoordinateRegion(
@@ -159,15 +179,6 @@ struct MapView: View {
                 MKCoordinateRegion(center: cluster.coordinate, span: newSpan)
             )
         }
-    }
-
-    private func daymarkTitle(for entry: PhotoEntry) -> String {
-        entry.day.formatted(.dateTime.month(.abbreviated).day().year())
-    }
-
-    private func focusMapIfNeeded() {
-        guard !locatedEntries.isEmpty else { return }
-        position = .automatic
     }
 
     private var locationAccessAlertBinding: Binding<Bool> {
@@ -245,22 +256,49 @@ final class DaymarkLocationManager: NSObject, ObservableObject, CLLocationManage
     }
 }
 
+/// The few fields clustering needs, read off the SwiftData model once per
+/// refresh instead of on every comparison.
+struct MapPin {
+    let entry: PhotoEntry
+    let latitude: Double
+    let longitude: Double
+    let day: Date
+
+    init?(_ entry: PhotoEntry) {
+        guard let latitude = entry.latitude, let longitude = entry.longitude else { return nil }
+        self.entry = entry
+        self.latitude = latitude
+        self.longitude = longitude
+        self.day = entry.day
+    }
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+}
+
 struct MapCluster: Identifiable {
-    let id: String
+    struct Key: Hashable {
+        let row: Int
+        let col: Int
+        let latStep: Double
+    }
+
+    let id: Key
     let coordinate: CLLocationCoordinate2D
     let representative: PhotoEntry
+    let title: String
     let count: Int
 }
 
 extension MKCoordinateRegion {
-    /// Whether the entry falls within this region, expanded by `marginFraction`
+    /// Whether the pin falls within this region, expanded by `marginFraction`
     /// on each side so pins just outside the edge aren't popped in and out.
-    func contains(_ entry: PhotoEntry, marginFraction: Double) -> Bool {
-        guard let lat = entry.latitude, let lon = entry.longitude else { return false }
+    func contains(_ pin: MapPin, marginFraction: Double) -> Bool {
         let latReach = span.latitudeDelta * (0.5 + marginFraction)
         let lonReach = span.longitudeDelta * (0.5 + marginFraction)
-        return abs(lat - center.latitude) <= latReach
-            && abs(lon - center.longitude) <= lonReach
+        return abs(pin.latitude - center.latitude) <= latReach
+            && abs(pin.longitude - center.longitude) <= lonReach
     }
 }
 
