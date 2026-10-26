@@ -141,16 +141,24 @@ struct MapView: View {
         }
 
         let vectors = pins.map(unitVector)
-        var x = vectors.reduce(0) { $0 + $1.x }
-        var y = vectors.reduce(0) { $0 + $1.y }
-        var z = vectors.reduce(0) { $0 + $1.z }
-        let length = (x * x + y * y + z * z).squareRoot()
-        if length > 1e-9 {
-            x /= length; y /= length; z /= length
-        } else {
-            // Photos on opposite sides of the planet: any center will do.
-            x = vectors[0].x; y = vectors[0].y; z = vectors[0].z
+
+        // Approximate center of the smallest circle enclosing every photo
+        // (Bădoiu–Clarkson: keep stepping toward the farthest point). Unlike a
+        // centroid it isn't pulled toward wherever most photos happen to be.
+        func normalized(_ v: (x: Double, y: Double, z: Double)) -> (x: Double, y: Double, z: Double) {
+            let length = (v.x * v.x + v.y * v.y + v.z * v.z).squareRoot()
+            return length > 1e-9 ? (v.x / length, v.y / length, v.z / length) : vectors[0]
         }
+        func dot(_ a: (x: Double, y: Double, z: Double), _ b: (x: Double, y: Double, z: Double)) -> Double {
+            a.x * b.x + a.y * b.y + a.z * b.z
+        }
+        var c = normalized(vectors.reduce((x: 0.0, y: 0.0, z: 0.0)) { ($0.x + $1.x, $0.y + $1.y, $0.z + $1.z) })
+        for step in 1...100 {
+            guard let far = vectors.min(by: { dot($0, c) < dot($1, c) }) else { break }
+            let t = 1 / Double(step + 1)
+            c = normalized((c.x + (far.x - c.x) * t, c.y + (far.y - c.y) * t, c.z + (far.z - c.z) * t))
+        }
+        let (x, y, z) = (c.x, c.y, c.z)
         let center = CLLocationCoordinate2D(
             latitude: atan2(z, (x * x + y * y).squareRoot()) * 180 / .pi,
             longitude: atan2(y, x) * 180 / .pi
@@ -164,9 +172,10 @@ struct MapView: View {
         let angle = min(farthest * 1.3 + 0.0002, .pi / 2.2)
 
         // Distance from the surface at which a point `angle` away sits within
-        // `halfFieldOfView` of the view axis.
+        // `halfFieldOfView` of the view axis. 8° approximates the horizontal
+        // half-angle of a portrait iPhone, the narrow side of the screen.
         let earthRadius = 6_371_000.0
-        let halfFieldOfView = 12.0 * .pi / 180
+        let halfFieldOfView = 8.0 * .pi / 180
         let distance = earthRadius * sin(angle) / tan(halfFieldOfView)
             - earthRadius * (1 - cos(angle))
 
