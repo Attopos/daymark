@@ -118,7 +118,7 @@ struct MapView: View {
     /// photos. Later visits keep wherever the camera was left.
     private func framePhotosIfNeeded() {
         guard !hasFramedPhotos else { return }
-        let located = entries.compactMap(MapPin.init)
+        let located = entries.compactMap { MapPin($0) }
         guard !located.isEmpty else { return }
         hasFramedPhotos = true
         position = .userLocation(
@@ -183,7 +183,7 @@ struct MapView: View {
     }
 
     private func refreshClusters() {
-        let located = entries.compactMap(MapPin.init)
+        let located = entries.compactMap { MapPin($0) }
         guard !located.isEmpty else {
             clusters = []
             return
