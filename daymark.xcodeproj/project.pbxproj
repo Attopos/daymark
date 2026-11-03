@@ -28,13 +28,13 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		B1A0001226AA000100000001 /* Embed App Extensions */ = {
+		B1A0001226AA000100000001 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			dstPath = "";
 			dstSubfolder = PlugIns;
 			files = (
 			);
-			name = "Embed App Extensions";
+			name = "Embed Foundation Extensions";
 		};
 /* End PBXCopyFilesBuildPhase section */
 
@@ -125,7 +125,7 @@
 				A14DCA2D2F9E72CC001750D5 /* Sources */,
 				A14DCA2E2F9E72CC001750D5 /* Frameworks */,
 				A14DCA2F2F9E72CC001750D5 /* Resources */,
-				B1A0001226AA000100000001 /* Embed App Extensions */,
+				B1A0001226AA000100000001 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
@@ -190,7 +190,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2640;
-				LastUpgradeCheck = 2640;
+				LastUpgradeCheck = 2710;
 				TargetAttributes = {
 					A14DCA302F9E72CC001750D5 = {
 						CreatedOnToolsVersion = 26.4.1;
@@ -340,6 +340,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = Daymark;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -399,6 +400,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = Daymark;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};
@@ -416,9 +418,12 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = daymark/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Daymark;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Daymark uses the camera so you can take photos for your daily entries.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Enable face ID to unlock your photos.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Allow Daymark to access your location to show places on the map.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Allow Daymark to access your photo library so you can pick photos for your entries.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Daymark uses your location to show your position on the map and attach locations to photo entries.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Daymark uses your photo library so you can choose photos to create and update your daily entries.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -458,9 +463,12 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = daymark/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Daymark;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Daymark uses the camera so you can take photos for your daily entries.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Enable face ID to unlock your photos.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Allow Daymark to access your location to show places on the map.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Allow Daymark to access your photo library so you can pick photos for your entries.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Daymark uses your location to show your position on the map and attach locations to photo entries.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Daymark uses your photo library so you can choose photos to create and update your daily entries.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
