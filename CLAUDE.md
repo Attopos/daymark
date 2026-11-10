@@ -9,3 +9,4 @@ iOS journal app (Xcode project `daymark.xcodeproj`, scheme `daymark`). Personal 
 - New branches are named `feature/attopos/<short-description>`, e.g. `feature/attopos/model-team-filter`.
 - No pull requests: once the build and tests pass on the Mac, merge into `main` and push.
 - Never commit `posters/`.
+- Release to the App Store with `scripts/release.sh` (archive, upload, submit for review via the App Store Connect API; `check`, `archive`, `--dry-run` are safe). Key and issuer ID live in `~/.appstoreconnect/`, never in git.
