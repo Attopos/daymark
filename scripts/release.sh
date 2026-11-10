@@ -8,15 +8,21 @@
 #   scripts/release.sh check         show the app's versions and recent builds in App Store Connect
 #
 # Options:
+#   --minor       bump x instead of y: 1.x.y -> 1.(x+1).0 (only when Aaron asks for a big release)
+#   --version V   use exactly this version
 #   --build N     build number (default: highest uploaded build of this version + 1)
 #   --skip-tests  don't run daymarkTests on the iPhone first
 #   --dry-run     for release/submit-only: print what would change in App Store Connect
 #   --keep        skip the cleanup at exit (prints where the archive is)
 #
-# The version is MARKETING_VERSION from the project; bump it there first. Release notes
-# ("What's New") come from release-notes/<version>/<locale>.txt, one file per App Store
-# localization (en-US.txt today). The build number is passed to xcodebuild, not written
-# into the project.
+# Versions are 1.x.y. By default the version is the latest one already in review or on the
+# App Store with y + 1 (1.3.1 -> 1.3.2); --minor gives 1.4.0. The version and build number
+# are written into the project before archiving, and after a successful upload the project
+# change is committed ("Bump version to V (build B)") and pushed when on main.
+# submit-only uses the version and build already in the project.
+#
+# Release notes ("What's New") come from release-notes/<version>/<locale>.txt, one file per
+# App Store localization (en-US.txt today).
 #
 # Credentials: ~/.appstoreconnect/daymark.env sets ASC_KEY_ID, ASC_ISSUER_ID and
 # ASC_KEY_PATH (the .p8 in ~/.appstoreconnect/private_keys). Neither file is in git.
@@ -29,15 +35,17 @@ REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$REPO"
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 
-MODE="release"; KEEP=0; SKIP_TESTS=0; DRY=0; BUILD=""
+MODE="release"; KEEP=0; SKIP_TESTS=0; DRY=0; BUILD=""; VERSION=""; MINOR=0
 while (( $# )); do
   case "$1" in
     --keep) KEEP=1 ;;
     --skip-tests) SKIP_TESTS=1 ;;
     --dry-run) DRY=1 ;;
     --build) BUILD="${2:?--build needs a number}"; shift ;;
+    --version) VERSION="${2:?--version needs a value}"; shift ;;
+    --minor) MINOR=1 ;;
     release|upload|archive|submit-only|check) MODE="$1" ;;
-    *) echo "usage: $0 [release|upload|archive|submit-only|check] [--build N] [--skip-tests] [--dry-run] [--keep]" >&2; exit 2 ;;
+    *) echo "usage: $0 [release|upload|archive|submit-only|check] [--minor] [--version V] [--build N] [--skip-tests] [--dry-run] [--keep]" >&2; exit 2 ;;
   esac
   shift
 done
@@ -71,10 +79,17 @@ trap 'exit 143' TERM
 
 if [[ "$MODE" == check ]]; then asc check; exit 0; fi
 
-VERSION="$(xcodebuild -project daymark.xcodeproj -scheme daymark -configuration Release -showBuildSettings 2>/dev/null \
-  | awk -F' = ' '/^ *MARKETING_VERSION = /{print $2; exit}')"
-[[ -n "$VERSION" ]] || { echo "error: could not read MARKETING_VERSION" >&2; exit 1; }
-[[ -n "$BUILD" ]] || BUILD="$(asc next-build "$VERSION")"
+if [[ "$MODE" == submit-only ]]; then
+  read -r P_VERSION P_BUILD < <(asc project-version)
+  VERSION="${VERSION:-$P_VERSION}"; BUILD="${BUILD:-$P_BUILD}"
+else
+  if [[ -z "$VERSION" ]]; then
+    if (( MINOR )); then VERSION="$(asc next-version --minor)"; else VERSION="$(asc next-version)"; fi
+  fi
+  [[ -n "$BUILD" ]] || BUILD="$(asc next-build "$VERSION")"
+fi
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$BUILD" =~ ^[0-9]+$ ]] || {
+  echo "error: bad version/build: '$VERSION' '$BUILD'" >&2; exit 1; }
 NOTES_DIR="$REPO/release-notes/$VERSION"
 echo "==> Daymark $VERSION ($BUILD)"
 
@@ -95,6 +110,22 @@ if [[ "$MODE" == submit-only ]]; then submit; echo "==> Done"; exit 0; fi
 if (( DRY )) && [[ "$MODE" == release ]]; then
   echo "==> --dry-run: not archiving or uploading"; submit; exit 0
 fi
+
+# Commit the version bump only if the project's diff is nothing but version lines.
+commit_version() {
+  local pbx=daymark.xcodeproj/project.pbxproj other
+  if git diff --quiet -- "$pbx"; then return; fi
+  other="$(git diff -U0 -- "$pbx" | grep -E '^[-+][^-+]' | grep -vE '^[-+]\s*(MARKETING_VERSION|CURRENT_PROJECT_VERSION) = ' || true)"
+  if [[ -n "$other" ]]; then
+    echo "   note: project.pbxproj has other changes; not committing the version bump"; return
+  fi
+  git commit -q -m "Bump version to $VERSION (build $BUILD)" -- "$pbx"
+  echo "   committed: Bump version to $VERSION (build $BUILD)"
+  if [[ "$(git branch --show-current)" == main ]]; then git push -q origin main && echo "   pushed to main"; fi
+}
+
+echo "==> Setting project version to $VERSION ($BUILD)"
+asc project-version --set "$VERSION" "$BUILD"
 
 if (( ! SKIP_TESTS )); then
   # build.sh cleans up after itself; the trap here is a second sweep.
@@ -133,7 +164,7 @@ xcodebuild -exportArchive -archivePath "$WORK/daymark.xcarchive" -exportPath "$W
 
 case "$MODE" in
   archive) ls -lh "$WORK/export"/*.ipa; echo "==> Archive OK (not uploaded)"; ((KEEP)) || echo "   (pass --keep to keep the .ipa)" ;;
-  upload)  echo "==> Uploaded $VERSION ($BUILD); submit later with: scripts/release.sh submit-only --build $BUILD" ;;
-  release) submit ;;
+  upload)  commit_version; echo "==> Uploaded $VERSION ($BUILD); submit later with: scripts/release.sh submit-only" ;;
+  release) commit_version; submit ;;
 esac
 echo "==> Done"

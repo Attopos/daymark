@@ -2,6 +2,8 @@
 """Small App Store Connect API client for Daymark releases. Standard library + openssl only.
 
     asc.py check                          show the app, its versions and recent builds
+    asc.py next-version [--minor]         print the next version: 1.x.y -> 1.x.(y+1), or 1.(x+1).0
+    asc.py project-version [--set V B]    print or set the app target's version and build in the project
     asc.py next-build VERSION             print the next free build number for VERSION
     asc.py submit VERSION BUILD [--notes-dir DIR] [--dry-run] [--timeout MIN]
         wait for the uploaded build to finish processing, attach it to the App Store
@@ -15,8 +17,8 @@ import argparse, base64, json, os, subprocess, sys, time, urllib.parse
 
 API = "https://api.appstoreconnect.apple.com"
 BUNDLE_ID = os.environ.get("BUNDLE_ID", "com.shizhengcao.Daymark")
-EDITABLE = {"PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED",
-            "INVALID_BINARY", "WAITING_FOR_REVIEW"}
+# App Store versions that can still take a new build. Anything else (in review, live, ...) is taken.
+EDITABLE = {"PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED", "INVALID_BINARY"}
 
 
 def die(msg):
@@ -73,7 +75,13 @@ def call(method, path, params=None, body=None):
            "-H", f"Authorization: Bearer {token()}", "-H", "Content-Type: application/json", url]
     if body is not None:
         cmd += ["--data-binary", "@-"]
-    r = subprocess.run(cmd, input=json.dumps(body).encode() if body is not None else None, capture_output=True)
+    for attempt in range(4):  # retry network failures (not HTTP errors) with backoff
+        r = subprocess.run(cmd, input=json.dumps(body).encode() if body is not None else None, capture_output=True)
+        if r.returncode == 0:
+            break
+        if attempt < 3:
+            print(f"   network error, retrying in {2 ** (attempt + 1)}s", file=sys.stderr)
+            time.sleep(2 ** (attempt + 1))
     if r.returncode != 0:
         die(f"{method} {path} failed: {r.stderr.decode(errors='replace').strip()}")
     raw, _, code = r.stdout.decode(errors="replace").rpartition("\n")
@@ -127,6 +135,45 @@ def cmd_check(_):
         a = b["attributes"]
         print(f"  {pre.get(rel['id'] if rel else '', '?'):<10} build {a['version']:<5} "
               f"{a['processingState']:<10} {a['uploadedDate'][:16]}")
+
+
+def cmd_next_version(args):
+    """Versions are 1.x.y: bump y each release, or x (y back to 0) with --minor."""
+    taken = []
+    for v in versions(find_app()["id"]):
+        parts = v["attributes"]["versionString"].split(".")
+        if v["attributes"]["appStoreState"] not in EDITABLE and all(p.isdigit() for p in parts):
+            taken.append(tuple(int(p) for p in (parts + ["0", "0"])[:3]))
+    if not taken:
+        die("no released version found to bump from; pass --version")
+    major, minor, patch = max(taken)
+    print(f"{major}.{minor + 1}.0" if args.minor else f"{major}.{minor}.{patch + 1}")
+
+
+PBXPROJ = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "daymark.xcodeproj", "project.pbxproj")
+
+
+def cmd_project_version(args):
+    """Print, or with --set rewrite, MARKETING_VERSION and CURRENT_PROJECT_VERSION of the app
+    target (the build configurations whose bundle id is BUNDLE_ID; test targets are left alone)."""
+    import re
+    text = open(PBXPROJ, encoding="utf-8").read()
+    blocks = [m for m in re.finditer(r"buildSettings = \{.*?\n\t\t\t\};", text, re.S)
+              if f"PRODUCT_BUNDLE_IDENTIFIER = {BUNDLE_ID};" in m.group(0)]
+    if not blocks:
+        die(f"no build configuration with bundle id {BUNDLE_ID} in {PBXPROJ}")
+    if not args.set:
+        b = blocks[0].group(0)
+        ver = re.search(r"MARKETING_VERSION = ([^;]+);", b).group(1)
+        num = re.search(r"CURRENT_PROJECT_VERSION = ([^;]+);", b).group(1)
+        print(ver, num)
+        return
+    version, build = args.set
+    for m in reversed(blocks):
+        b = re.sub(r"MARKETING_VERSION = [^;]+;", f"MARKETING_VERSION = {version};", m.group(0))
+        b = re.sub(r"CURRENT_PROJECT_VERSION = [^;]+;", f"CURRENT_PROJECT_VERSION = {build};", b)
+        text = text[:m.start()] + b + text[m.end():]
+    open(PBXPROJ, "w", encoding="utf-8").write(text)
 
 
 def cmd_next_build(args):
@@ -268,6 +315,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("check").set_defaults(fn=cmd_check)
+    nv = sub.add_parser("next-version"); nv.add_argument("--minor", action="store_true")
+    nv.set_defaults(fn=cmd_next_version)
+    pv = sub.add_parser("project-version"); pv.add_argument("--set", nargs=2, metavar=("VERSION", "BUILD"))
+    pv.set_defaults(fn=cmd_project_version)
     nb = sub.add_parser("next-build"); nb.add_argument("version"); nb.set_defaults(fn=cmd_next_build)
     s = sub.add_parser("submit")
     s.add_argument("version"); s.add_argument("build", type=int)
