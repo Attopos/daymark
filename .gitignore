@@ -6,3 +6,4 @@ build/
 *.ipa
 *.dSYM/
 *.xcresult/
+posters/
