@@ -42,6 +42,29 @@ final class daymarkUITests: XCTestCase {
     }
 
     @MainActor
+    func testExportPresentsSavePickerWithoutCrashing() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-hasCompletedWelcome", "YES", "-uiTestSeedPhoto"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 10))
+        app.tabBars.buttons["Settings"].tap()
+        let export = app.buttons["Export"]
+        XCTAssertTrue(export.waitForExistence(timeout: 5))
+        let enabled = NSPredicate(format: "isEnabled == true")
+        expectation(for: enabled, evaluatedWith: export)
+        waitForExpectations(timeout: 15)
+        export.tap()
+        // The save picker is presented by the system; Daymark must still be
+        // running after it has been asked to present it.
+        sleep(8)
+        XCTAssertNotEqual(app.state, .notRunning, "Daymark crashed while presenting the export picker")
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "Export picker"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
     func testMapOpensAndTogglesSatellite() throws {
         let app = XCUIApplication()
         // No -mapShowsSatellite launch argument: the argument domain outranks

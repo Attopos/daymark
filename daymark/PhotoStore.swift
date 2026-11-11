@@ -1646,5 +1646,10 @@ nonisolated struct DaymarkBackupExportItem: Transferable, Sendable {
         FileRepresentation(exportedContentType: .zip) { item in
             SentTransferredFile(item.url)
         }
+        // Without a suggested name SwiftUI hands fileExporter's file wrapper
+        // an empty preferredFilename, which NSFileWrapper rejects with an
+        // uncaught exception: the app crashed as soon as the save picker
+        // was about to appear. The picker still offers defaultFilename.
+        .suggestedFileName { $0.url.lastPathComponent }
     }
 }

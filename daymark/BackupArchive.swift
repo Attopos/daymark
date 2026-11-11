@@ -49,9 +49,17 @@ actor BackupArchiveWriter {
 
     init() throws {
         directory = try BackupArchiveReader.makeWorkingDirectory(prefix: "export")
-        url = directory.appendingPathComponent("daymark-backup.zip")
+        url = directory.appendingPathComponent(Self.archiveName())
         let created: Archive = try Archive(url: url, accessMode: .create)
         archive = created
+    }
+
+    static func archiveName(at date: Date = .now) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        return "daymark-backup-\(formatter.string(from: date)).zip"
     }
 
     func addPhoto(_ data: Data, metadata: DaymarkBackupEntry, index: Int) throws -> DaymarkBackupEntry {

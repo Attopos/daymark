@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
@@ -38,6 +39,19 @@ struct ContentView: View {
             defer { isRunningAssetSync = false }
 
             photoStore.purgeSentinelEntries(in: modelContext)
+#if DEBUG
+            // UI tests run against the empty Debug library; this gives the
+            // export flow one real photo to work with.
+            if ProcessInfo.processInfo.arguments.contains("-uiTestSeedPhoto"), entries.isEmpty {
+                let image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64)).image { context in
+                    UIColor.systemTeal.setFill()
+                    context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+                }
+                if let data = image.jpegData(compressionQuality: 0.9) {
+                    try? await photoStore.savePhotoData(data, for: .now, in: modelContext)
+                }
+            }
+#endif
             await photoStore.migrateLegacyLibraryIfNeeded(in: modelContext)
             photoStore.backfillMetadata(for: entries, in: modelContext)
             do {
