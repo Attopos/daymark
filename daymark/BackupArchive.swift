@@ -55,6 +55,13 @@ actor BackupArchiveWriter {
     }
 
     func addPhoto(_ data: Data, metadata: DaymarkBackupEntry, index: Int) throws -> DaymarkBackupEntry {
+        // Decoding for verification creates autoreleased ImageIO buffers.
+        // Without a per-photo pool they pile up for the whole export and a
+        // large library runs out of memory on device.
+        try autoreleasepool { try addPhotoInPool(data, metadata: metadata, index: index) }
+    }
+
+    private func addPhotoInPool(_ data: Data, metadata: DaymarkBackupEntry, index: Int) throws -> DaymarkBackupEntry {
         try Task.checkCancellation()
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               CGImageSourceGetCount(source) > 0, let type = CGImageSourceGetType(source),
@@ -128,11 +135,11 @@ nonisolated enum BackupArchiveReader {
             var report = LegacyRestoreReport()
             if isLegacy(payload) { (payload, report, _) = try normalizeLegacy(payload, archive: nil) }
             try validateMetadata(payload)
-            for entry in payload.entries {
+            for entry in payload.entries { try autoreleasepool {
                 let name = entry.dayKey ?? entry.day.description
                 guard let data = entry.legacyImageData else { throw BackupError.damagedPhoto(name) }
                 try verifyDecodablePhoto(CGImageSourceCreateWithData(data as CFData, nil), name: name)
-            }
+            } }
             var result = BackupContents(payload: payload)
             result.legacyReport = report
             return result
@@ -148,12 +155,12 @@ nonisolated enum BackupArchiveReader {
         let directory = try makeWorkingDirectory(prefix: "import")
         do {
             try FileManager.default.createDirectory(at: directory.appendingPathComponent("images"), withIntermediateDirectories: true)
-            for metadata in payload.entries {
+            for metadata in payload.entries { try autoreleasepool {
                 try Task.checkCancellation()
                 guard let filename = metadata.imageFilename else {
                     guard let data = metadata.legacyImageData else { throw BackupError.damagedPhoto(metadata.day.description) }
                     try verifyDecodablePhoto(CGImageSourceCreateWithData(data as CFData, nil), name: metadata.day.description)
-                    continue
+                    return
                 }
                 guard isSafeFilename(filename), let photo = legacy ? legacySources[filename] : archive["images/" + filename],
                       photo.type == .file else {
@@ -173,7 +180,7 @@ nonisolated enum BackupArchiveReader {
                     try? file.close()
                     throw error
                 }
-            }
+            } }
             var result = BackupContents(payload: payload)
             result.workingDirectory = directory
             result.legacyReport = report
@@ -189,13 +196,13 @@ nonisolated enum BackupArchiveReader {
         let payload = try readPayload(archive)
         let serializedExpected = try decode(encode(expected))
         guard payload.entries == serializedExpected.entries else { throw BackupError.invalidEntriesJSON }
-        for metadata in payload.entries {
+        for metadata in payload.entries { try autoreleasepool {
             try Task.checkCancellation()
             guard let filename = metadata.imageFilename, let entry = archive["images/" + filename] else {
                 throw BackupError.invalidArchive
             }
             try verifyPhoto(archive, entry: entry, metadata: metadata) { _ in }
-        }
+        } }
     }
 
     private static func verifyPhoto(_ archive: Archive, entry: Entry, metadata: DaymarkBackupEntry,

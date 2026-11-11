@@ -71,6 +71,11 @@ confirmation states how many records were combined or skipped. v3 archives are
 still rejected on any duplicate day, ID or filename.
 Staging folders left in tmp by an interrupted export or import are removed at
 the next launch. Switching tabs no longer cancels a running export or import.
+Each photo's verification decode runs in its own autorelease pool during
+export, import preparation and the post-export check, so memory stays flat for
+large libraries instead of growing until the app is killed. Leaked debug/test
+sentinel records (dated 2100 or later) are left out of exports instead of
+failing the whole archive.
 Metadata is capped at 32 MB per ZIP; legacy standalone JSON is capped at 512 MB.
 Those limits apply to metadata/legacy JSON, not to the total ZIP size.
 

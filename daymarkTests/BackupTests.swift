@@ -334,6 +334,23 @@ final class BackupTests: XCTestCase {
         XCTAssertNil(entry.localOriginalFilename)
     }
 
+    func testLeakedSentinelEntryDoesNotBlockExport() async throws {
+        let root = try directory(), photoStore = store(root), modelContainer = try container(), context = ModelContext(modelContainer)
+        let real = PhotoEntry(day: day())
+        let sentinel = PhotoEntry(day: PhotoEntry.sentinelDayCutoff)
+        context.insert(real); context.insert(sentinel); try context.save()
+        try photoStore.storeDownloadedOriginal(try png(.red), for: real)
+        try photoStore.storeDownloadedOriginal(try png(.blue), for: sentinel)
+        try context.save()
+
+        let item = try await photoStore.makeBackupExportItem(from: [real, sentinel], in: context, allowCloudDownload: false)
+        addTeardownBlock { item.cleanUp() }
+        XCTAssertEqual(item.entryCount, 1)
+        let contents = try BackupArchiveReader.read(from: item.url)
+        defer { contents.cleanUp() }
+        XCTAssertEqual(contents.payload.entries.map(\.id), [real.id])
+    }
+
     func testCorruptCloudOriginalIsNotSaved() async throws {
         let photoStore = store(try directory()), modelContainer = try container(), context = ModelContext(modelContainer)
         let data = try png()

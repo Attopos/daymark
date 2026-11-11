@@ -252,6 +252,10 @@ struct PhotoStore {
         progress: @escaping (Int, Int, String) -> Void = { _, _, _ in }
     ) async throws -> DaymarkBackupExportItem {
         try modelContext.save()
+        // Leaked debug/test sentinels (year 2100+) are not user content and
+        // their day key is outside the archive's valid range; a single one
+        // would otherwise make the whole export fail metadata validation.
+        let entries = entries.filter { !Self.isSentinel($0) }
         let snapshots = entries.map(backupEntry)
         var sourceRevisions = entries.map(originalRevision)
         try BackupArchiveReader.validateMetadata(DaymarkBackupPayload(version: 3, exportedAt: .now, entries: snapshots))
@@ -306,7 +310,7 @@ struct PhotoStore {
                 progress(index + 1, entries.count, "Prepared \(index + 1) of \(entries.count) photos")
             }
             try Task.checkCancellation()
-            let currentEntries = try modelContext.fetch(FetchDescriptor<PhotoEntry>())
+            let currentEntries = try modelContext.fetch(FetchDescriptor<PhotoEntry>()).filter { !Self.isSentinel($0) }
             guard Set(currentEntries.map(\.id)) == Set(entries.map(\.id)),
                   entries.enumerated().allSatisfy({ !$0.element.isDeleted && backupEntry($0.element) == snapshots[$0.offset] && originalRevision($0.element) == sourceRevisions[$0.offset] }) else {
                 throw BackupError.libraryChanged
@@ -318,6 +322,10 @@ struct PhotoStore {
             await writer.cancel()
             throw error
         }
+    }
+
+    private static func isSentinel(_ entry: PhotoEntry) -> Bool {
+        entry.day >= PhotoEntry.sentinelDayCutoff
     }
 
     private func backupEntry(_ entry: PhotoEntry) -> DaymarkBackupEntry {
