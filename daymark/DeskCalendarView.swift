@@ -58,11 +58,7 @@ struct DeskCalendarView: View {
             }
             .overlay {
                 if entries.isEmpty {
-                    ContentUnavailableView(
-                        "No Daymarks Yet",
-                        systemImage: "calendar",
-                        description: Text("Your desk calendar fills in as you add daymarks.")
-                    )
+                    DaymarkEmptyState(title: "No Daymarks Yet", message: "Mark a day and it appears here.")
                 }
             }
             .sensoryFeedback(.selection, trigger: anchorID)
@@ -328,6 +324,16 @@ private struct CalendarPage: View {
             footer
                 .padding(.top, 12)
         }
+        .overlay(alignment: .bottomTrailing) {
+            // The day's postmark, struck across the corner of the photograph.
+            DaymarkPostmark(
+                date: entry.day,
+                place: entry.city ?? entry.countryName,
+                region: entry.city == nil ? nil : entry.countryName,
+                diameter: 62
+            )
+            .offset(x: 6, y: 4)
+        }
         .padding(.horizontal, 18)
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -394,6 +400,8 @@ private struct CalendarPage: View {
 
             Spacer(minLength: 0)
         }
+        // Leave the trailing corner to the postmark.
+        .padding(.trailing, 52)
         .frame(minHeight: 28)
     }
 }

@@ -27,6 +27,10 @@ struct WelcomeView: View {
             .accessibilityHidden(true)
 
             VStack(spacing: 10) {
+                DaymarkBeaconRow(size: 12)
+                    .padding(.bottom, DaymarkSpacing.xs)
+                    .opacity(hasAppeared ? 1 : 0)
+
                 Text("Welcome to Daymark")
                     .font(DaymarkTypography.pageTitle)
                     .multilineTextAlignment(.center)

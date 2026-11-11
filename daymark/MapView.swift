@@ -423,9 +423,9 @@ struct ClusterAnnotation: View {
             }
         }
         .frame(width: 40, height: 40)
-        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
                 .stroke(DaymarkPalette.photoMount, lineWidth: 2)
         }
         .overlay(alignment: .topTrailing) {
@@ -457,17 +457,19 @@ struct PhotoMapAnnotation: View {
                 }
             }
             .frame(width: 32, height: 32)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
                     .stroke(DaymarkPalette.photoMount, lineWidth: 2)
             }
             .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
 
-            Image(systemName: "triangle.fill")
-                .font(.system(size: 8))
-                .foregroundStyle(DaymarkPalette.photoMount)
-                .offset(y: -2)
+            // The pin's foot is a daymark diamond in the mark colour.
+            DaymarkBeaconMark(size: 9)
+                .overlay {
+                    DaymarkBeaconShape(beacon: .diamond).stroke(DaymarkPalette.photoMount, lineWidth: 1.5)
+                }
+                .offset(y: -3)
         }
     }
 }

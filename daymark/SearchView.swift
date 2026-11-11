@@ -72,6 +72,11 @@ struct SearchView: View {
                 .padding(.bottom, metrics.bottomPadding)
             }
         }
+        .overlay {
+            if !trimmedSearchText.isEmpty, filteredEntries.isEmpty {
+                DaymarkEmptyState(title: "No Daymarks Found")
+            }
+        }
         .daymarkNavigationTitle("Search")
         .toolbarTitleDisplayMode(.inlineLarge)
         .searchable(

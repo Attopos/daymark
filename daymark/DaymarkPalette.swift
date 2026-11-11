@@ -204,22 +204,6 @@ struct DaymarkIconBadge: View {
     }
 }
 
-/// Month heading for the grids: serif on paper, so it reads as a clean bar when pinned.
-struct DaymarkSectionHeader: View {
-    let title: String
-
-    var body: some View {
-        Text(title)
-            .font(DaymarkTypography.sectionTitle)
-            .foregroundStyle(DaymarkPalette.ink)
-            .padding(.horizontal, 17)
-            .padding(.top, DaymarkSpacing.m)
-            .padding(.bottom, DaymarkSpacing.xs)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityAddTraits(.isHeader)
-    }
-}
-
 /// Gives cards, tiles and links a small spring when pressed.
 struct DaymarkPressableButtonStyle: ButtonStyle {
     var pressedScale: CGFloat = 0.96

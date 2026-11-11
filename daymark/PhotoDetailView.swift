@@ -227,27 +227,36 @@ struct PhotoDetailView: View {
     }
 
     private var metadataSection: some View {
-        HStack {
-            let city = locationLocalizer.localizedCity(for: entry)
-            let countryName = locationLocalizer.localizedCountryName(for: entry)
-            if let place = city ?? countryName {
-                metadataRow(flag: entry.flagEmoji, title: "Location", value: place)
-            } else if let lat = entry.latitude, let lon = entry.longitude {
-                metadataRow(
-                    flag: entry.flagEmoji,
-                    title: "Coordinates",
-                    value: formatCoordinates(lat: lat, lon: lon)
-                )
+        let city = locationLocalizer.localizedCity(for: entry)
+        let countryName = locationLocalizer.localizedCountryName(for: entry)
+        return HStack(alignment: .center, spacing: DaymarkSpacing.s) {
+            VStack(alignment: .leading, spacing: DaymarkSpacing.s) {
+                if let place = city ?? countryName {
+                    metadataRow(flag: entry.flagEmoji, title: "Location", value: place)
+                } else if let lat = entry.latitude, let lon = entry.longitude {
+                    metadataRow(
+                        flag: entry.flagEmoji,
+                        title: "Coordinates",
+                        value: formatCoordinates(lat: lat, lon: lon)
+                    )
+                }
+
+                Button {
+                    showingLocationPicker = true
+                } label: {
+                    Label("Choose on the map", systemImage: "map")
+                }
+                .buttonStyle(DaymarkSecondaryButtonStyle())
             }
 
-            Spacer()
+            Spacer(minLength: 0)
 
-            Button {
-                showingLocationPicker = true
-            } label: {
-                Label("Choose on the map", systemImage: "map")
-            }
-            .buttonStyle(DaymarkSecondaryButtonStyle())
+            DaymarkPostmark(
+                date: entry.day,
+                place: city ?? countryName,
+                region: city == nil ? nil : countryName,
+                diameter: 96
+            )
         }
         .padding(DaymarkSpacing.m)
         .frame(maxWidth: .infinity, alignment: .leading)

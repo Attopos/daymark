@@ -20,6 +20,8 @@ struct CalendarView: View {
     @State private var pastDaysSelectedDate = Date()
     @State private var pastDaysPhotoItem: PhotosPickerItem?
     @State private var pendingLocationImport: PendingPhotoImport?
+    /// Set when a day has just been marked, to play the stamp once.
+    @State private var stampedDate: Date?
     @State private var gridColumnCount = 3
     @State private var pinchStartingColumnCount: Int?
     @ScaledMetric(relativeTo: .headline) private var tileDayFontSize: CGFloat = 16
@@ -114,6 +116,18 @@ struct CalendarView: View {
             Task {
                 await importPickedPhoto(newItem, for: Date())
                 selectedItem = nil
+            }
+        }
+        .overlay {
+            if let stampedDate {
+                DaymarkStampOverlay(date: stampedDate)
+                    .transition(.opacity)
+                    .task {
+                        try? await Task.sleep(for: .milliseconds(1300))
+                        withAnimation(.easeOut(duration: 0.35)) {
+                            self.stampedDate = nil
+                        }
+                    }
             }
         }
         .alert("Photo Import Failed", isPresented: errorAlertBinding) {
@@ -280,6 +294,11 @@ struct CalendarView: View {
                                 Text(dayNumberText(for: date))
                                     .font(.system(.body, design: .serif, weight: isSelected ? .semibold : .regular))
                                     .foregroundStyle(dayForegroundStyle(isSelected: isSelected, isToday: isToday, hasEntry: hasEntry))
+
+                                if isToday {
+                                    DaymarkBeaconMark(size: 5, color: isSelected ? DaymarkPalette.paper : DaymarkPalette.mark)
+                                        .offset(y: 14)
+                                }
                             }
                             .frame(maxWidth: .infinity, minHeight: 36)
                             .background {
@@ -324,17 +343,19 @@ struct CalendarView: View {
                         }
                     }
                 } header: {
-                    DaymarkSectionHeader(title: month.formatted(.dateTime.month(.wide).year()))
+                    DaymarkMonthHeader(month: month, markedDays: entries(in: month).count)
                 }
             }
         }
     }
 
     private func gapTile(id: String, size: CGFloat) -> some View {
-        Text("...")
-            .font(.system(.title2, design: .serif, weight: .medium))
-            .foregroundStyle(DaymarkPalette.secondaryInk)
-            .frame(width: size, height: size)
+        HStack(spacing: max(3, size * 0.06)) {
+            ForEach(0..<3, id: \.self) { _ in
+                DaymarkBeaconMark(size: max(4, size * 0.07), filled: false, color: DaymarkPalette.secondaryInk)
+            }
+        }
+        .frame(width: size, height: size)
             .accessibilityLabel("More daymarks between visible dates")
             .id(id)
     }
@@ -378,12 +399,15 @@ struct CalendarView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .top, spacing: 8 * overlayScale) {
                         VStack(alignment: .leading, spacing: overlayScale) {
-                            Text("Today")
-                                .font(.system(size: tileDayFontSize * overlayScale, weight: .semibold, design: .serif))
-                                .foregroundStyle(DaymarkPalette.mark)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.5)
-                                .allowsTightening(true)
+                            HStack(spacing: 4 * overlayScale) {
+                                DaymarkBeaconMark(size: 8 * overlayScale)
+                                Text("Today")
+                                    .font(.system(size: tileDayFontSize * overlayScale, weight: .semibold, design: .serif))
+                                    .foregroundStyle(DaymarkPalette.mark)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.5)
+                                    .allowsTightening(true)
+                            }
 
                             Text("Create mark")
                                 .font(.system(size: tileMetadataFontSize * overlayScale, weight: .medium))
@@ -466,7 +490,7 @@ struct CalendarView: View {
                         }
                     }
                 } header: {
-                    DaymarkSectionHeader(title: month.formatted(.dateTime.month(.wide).year()))
+                    DaymarkMonthHeader(month: month, markedDays: entries(in: month).count)
                 }
             }
 
@@ -659,6 +683,7 @@ struct CalendarView: View {
 
             if photoStore.hasEmbeddedLocation(in: data) {
                 try await photoStore.savePhotoData(data, for: date, in: modelContext)
+                stampedDate = date
                 if dismissAddSheetOnSave {
                     showingAddSheet = false
                 }
@@ -683,6 +708,7 @@ struct CalendarView: View {
                 locationOverride: location
             )
             pendingLocationImport = nil
+            stampedDate = importItem.date
         } catch {
             errorMessage = "Could not import that photo."
         }
@@ -821,12 +847,17 @@ struct MarkCard: View {
                 VStack(spacing: 0) {
                     HStack(alignment: .top, spacing: 8 * overlayScale) {
                         VStack(alignment: .leading, spacing: overlayScale) {
-                            Text(dayText)
-                                .font(.system(size: dayFontSize * overlayScale, weight: .semibold, design: .serif))
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.5)
-                                .allowsTightening(true)
+                            HStack(spacing: 4 * overlayScale) {
+                                if Calendar.current.isDateInToday(entry.day) {
+                                    DaymarkBeaconMark(size: 8 * overlayScale, color: .white)
+                                }
+                                Text(dayText)
+                                    .font(.system(size: dayFontSize * overlayScale, weight: .semibold, design: .serif))
+                                    .foregroundStyle(.white)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.5)
+                                    .allowsTightening(true)
+                            }
 
                             if let subtitleText {
                                 Text(subtitleText)
