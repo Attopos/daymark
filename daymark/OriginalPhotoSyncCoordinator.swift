@@ -8,6 +8,8 @@ struct RemoteOriginalPhoto: Equatable {
     let contentHash: String
     let byteCount: Int64
     let modifiedAt: Date
+    /// Hash of the full-size photo this record was re-encoded from, if any.
+    var derivedFromHash: String? = nil
 }
 
 struct OriginalPhotoUploadRequest {
@@ -16,6 +18,7 @@ struct OriginalPhotoUploadRequest {
     let contentHash: String
     let byteCount: Int64
     let modifiedAt: Date
+    var derivedFromHash: String? = nil
 }
 
 protocol OriginalPhotoRemoteStore {
@@ -98,11 +101,18 @@ struct OriginalPhotoSyncCoordinator {
 
             if let localData, let remote {
                 let localHash = entry.originalContentHash ?? Self.hash(localData)
+                // A compaction is a local edit of the photo it was made from:
+                // upload it over that photo, but if iCloud already holds
+                // another device's compaction of the same photo, take that.
+                let compactedFrom = entry.originalCompactedFromHash
+                let remoteIsCompactionSource = compactedFrom != nil && remote.contentHash == compactedFrom
+                let remoteIsSiblingCompaction = remote.derivedFromHash != nil
+                    && (remote.derivedFromHash == compactedFrom || remote.derivedFromHash == localHash)
                 if localHash == remote.contentHash {
                     markSynced(entry, contentHash: localHash)
                     summary.skippedCount += 1
-                } else if let baseHash = entry.originalLastSyncedHash,
-                          remote.contentHash == baseHash {
+                } else if remoteIsCompactionSource
+                            || entry.originalLastSyncedHash.map({ remote.contentHash == $0 }) == true {
                     let byteCount = Int64(localData.count)
                     guard canTransfer(byteCount, summary: summary, limits: limits) else {
                         _ = entry.transitionSyncState(for: .original, to: .pendingUpload)
@@ -120,7 +130,8 @@ struct OriginalPhotoSyncCoordinator {
                                 data: localData,
                                 contentHash: localHash,
                                 byteCount: byteCount,
-                                modifiedAt: .now
+                                modifiedAt: .now,
+                                derivedFromHash: compactedFrom
                             ),
                             overwrite: true
                         )
@@ -132,8 +143,8 @@ struct OriginalPhotoSyncCoordinator {
                         markFailed(entry, message: error.localizedDescription)
                         summary.failedCount += 1
                     }
-                } else if let baseHash = entry.originalLastSyncedHash,
-                          localHash == baseHash {
+                } else if remoteIsSiblingCompaction
+                            || entry.originalLastSyncedHash.map({ localHash == $0 }) == true {
                     guard canTransfer(remote.byteCount, summary: summary, limits: limits) else {
                         _ = entry.transitionSyncState(for: .original, to: .pendingDownload)
                         summary.deferredCount += 1
@@ -247,7 +258,8 @@ struct OriginalPhotoSyncCoordinator {
                         data: localData,
                         contentHash: contentHash,
                         byteCount: byteCount,
-                        modifiedAt: entry.syncStateUpdatedAt ?? .now
+                        modifiedAt: entry.syncStateUpdatedAt ?? .now,
+                        derivedFromHash: entry.originalCompactedFromHash
                     )
                 )
                 _ = entry.transitionSyncState(for: .original, to: .synced)
@@ -375,7 +387,7 @@ struct CloudKitOriginalPhotoStore: OriginalPhotoRemoteStore {
             let changes = try await database.recordZoneChanges(
                 inZoneWith: zoneID,
                 since: token,
-                desiredKeys: ["contentHash", "byteCount", "modifiedAt"]
+                desiredKeys: ["contentHash", "byteCount", "modifiedAt", "derivedFromHash"]
             )
             for result in changes.modificationResultsByID.values {
                 guard case .success(let modification) = result else { continue }
@@ -388,7 +400,8 @@ struct CloudKitOriginalPhotoStore: OriginalPhotoRemoteStore {
                     entryID: record.recordID.recordName,
                     contentHash: contentHash,
                     byteCount: byteCount,
-                    modifiedAt: modifiedAt
+                    modifiedAt: modifiedAt,
+                    derivedFromHash: (record["derivedFromHash"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 )
             }
             token = changes.changeToken
@@ -413,6 +426,8 @@ struct CloudKitOriginalPhotoStore: OriginalPhotoRemoteStore {
         record["contentHash"] = request.contentHash as CKRecordValue
         record["byteCount"] = request.byteCount as CKRecordValue
         record["modifiedAt"] = request.modifiedAt as CKRecordValue
+        // Always written ("" = none) so an overwrite never leaves a stale value.
+        record["derivedFromHash"] = (request.derivedFromHash ?? "") as CKRecordValue
 
         try await withCheckedThrowingContinuation { continuation in
             let operation = CKModifyRecordsOperation(recordsToSave: [record])

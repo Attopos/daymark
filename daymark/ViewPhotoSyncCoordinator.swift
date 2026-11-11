@@ -281,7 +281,7 @@ struct CloudKitViewPhotoStore: ViewPhotoRemoteStore {
     func upload(_ requests: [ViewPhotoUploadRequest], overwrite: Bool) async throws {
         try await ensureZoneExists()
 
-        for chunk in requests.chunked(maximumCount: 100) {
+        for chunk in requests.chunked(maximumCount: 25) {
             var temporaryURLs: [URL] = []
             defer {
                 for url in temporaryURLs {

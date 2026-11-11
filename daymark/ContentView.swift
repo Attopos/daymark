@@ -30,7 +30,7 @@ struct ContentView: View {
         }
         .tint(DaymarkPalette.accent)
         .buttonBorderShape(.capsule)
-        .toolbarBackground(DaymarkPalette.paper, for: .tabBar)
+        .tabBarMinimizeBehavior(.onScrollDown)
         .preferredColorScheme(prefersDarkMode ? .dark : .light)
         .task(id: assetSyncKey) {
             try? await Task.sleep(for: .milliseconds(300))
@@ -62,6 +62,7 @@ struct ContentView: View {
 #endif
             }
             let currentEntries = (try? modelContext.fetch(FetchDescriptor<PhotoEntry>())) ?? entries
+            await photoStore.compactLibraryIfNeeded(for: currentEntries, in: modelContext)
             photoStore.migrateEmbeddedThumbnails(for: currentEntries, in: modelContext)
             await photoStore.backfillViewPhotos(for: currentEntries, in: modelContext)
 

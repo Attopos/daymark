@@ -573,10 +573,11 @@ final class BackupTests: XCTestCase {
         let oldThumbnailFilename = try XCTUnwrap(restored.localThumbnailFilename)
         let oldViewFilename = try XCTUnwrap(restored.localViewPhotoFilename)
         let replacementImage = try XCTUnwrap(UIImage(data: try png(.magenta)))
-        let replacement = try XCTUnwrap(replacementImage.jpegData(compressionQuality: 0.92))
         // Use the normal photo-editor save path; it is synchronous and never
         // invokes a network geocoder or any remote photo service.
         try target.saveEditedImage(replacementImage, for: restored, in: targetContext)
+        // The editor stores its result in the bounded storage format (HEIC).
+        let replacement = try PhotoEncoding.storedOriginal(from: try XCTUnwrap(replacementImage.cgImage))
         XCTAssertNotEqual(replacement, original)
         assertMetadata(restored, matches: expected)
         try assertReadableAssets(for: restored, original: replacement, in: target)

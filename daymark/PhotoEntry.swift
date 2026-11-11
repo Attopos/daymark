@@ -21,6 +21,11 @@ final class PhotoEntry {
     var originalByteCount: Int64?
     var originalContentHash: String?
     var originalLastSyncedHash: String?
+    /// `PhotoEncoding.storageVersion` the local original was checked against.
+    var photoStorageVersion: Int?
+    /// Hash of the full-size original this entry's photo was re-encoded from,
+    /// so two devices that compact the same photo agree instead of conflicting.
+    var originalCompactedFromHash: String?
     var thumbnailByteCount: Int64?
     var thumbnailContentHash: String?
     var thumbnailModifiedAt: Date?

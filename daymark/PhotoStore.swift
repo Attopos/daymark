@@ -97,16 +97,6 @@ struct PhotoStore {
         return formatter
     }()
 
-    private nonisolated enum Thumbnail {
-        static let maxPixelSize = 300.0
-        static let compressionQuality = 0.82
-    }
-
-    private nonisolated enum ViewPhoto {
-        static let maxPixelSize = 2_048.0
-        static let compressionQuality = 0.88
-    }
-
     init(
         originalsDirectoryURL: URL? = nil,
         thumbnailsDirectoryURL: URL? = nil,
@@ -358,7 +348,7 @@ struct PhotoStore {
             nil
         }
         let captureDate = captureDate(from: data) ?? date
-        let (thumbnailData, viewPhotoData) = try await renditions(from: data)
+        let (storedData, thumbnailData, viewPhotoData) = try await storedRenditions(from: data)
         let entry = try existingEntry(for: normalizedDate, in: modelContext) ?? PhotoEntry(day: normalizedDate)
         let oldImageData = entry.imageData
         let oldThumbnailData = entry.thumbnailData
@@ -377,7 +367,9 @@ struct PhotoStore {
         let oldOriginalByteCount = entry.originalByteCount
         let oldOriginalContentHash = entry.originalContentHash
         let oldOriginalSyncState = entry.originalSyncState
-        let storedOriginal = try originalFileStore.write(data, ownerID: entry.id)
+        let oldStorageVersion = entry.photoStorageVersion
+        let oldCompactedFromHash = entry.originalCompactedFromHash
+        let storedOriginal = try originalFileStore.write(storedData, ownerID: entry.id)
         let storedThumbnail = try thumbnailFileStore.write(thumbnailData, ownerID: entry.id)
         let storedViewPhoto = try viewPhotoFileStore.write(viewPhotoData, ownerID: entry.id)
 
@@ -404,6 +396,8 @@ struct PhotoStore {
         entry.originalByteCount = storedOriginal.byteCount
         entry.originalContentHash = storedOriginal.contentHash
         entry.originalSyncState = .localOnly
+        entry.photoStorageVersion = PhotoEncoding.storageVersion
+        entry.originalCompactedFromHash = nil
         entry.latitude = location?.latitude
         entry.longitude = location?.longitude
         entry.timezone = TimeZone.current.identifier
@@ -453,6 +447,8 @@ struct PhotoStore {
             entry.originalByteCount = oldOriginalByteCount
             entry.originalContentHash = oldOriginalContentHash
             entry.originalSyncState = oldOriginalSyncState
+            entry.photoStorageVersion = oldStorageVersion
+            entry.originalCompactedFromHash = oldCompactedFromHash
             throw error
         }
 
@@ -469,10 +465,10 @@ struct PhotoStore {
     }
 
     func saveEditedImage(_ image: UIImage, for entry: PhotoEntry, in modelContext: ModelContext) throws {
-        let normalizedImage = image.normalizedImage()
-        guard let imageData = normalizedImage.jpegData(compressionQuality: 0.92) else {
+        guard let cgImage = image.normalizedImage().cgImage else {
             throw PhotoStoreError.invalidImageData
         }
+        let imageData = try PhotoEncoding.storedOriginal(from: cgImage)
         let newThumbnailData = try thumbnailData(from: imageData)
         let newViewPhotoData = try viewPhotoData(from: imageData)
 
@@ -493,6 +489,8 @@ struct PhotoStore {
         let oldOriginalByteCount = entry.originalByteCount
         let oldOriginalContentHash = entry.originalContentHash
         let oldOriginalSyncState = entry.originalSyncState
+        let oldStorageVersion = entry.photoStorageVersion
+        let oldCompactedFromHash = entry.originalCompactedFromHash
         let storedOriginal = try originalFileStore.write(imageData, ownerID: entry.id)
         let storedThumbnail = try thumbnailFileStore.write(newThumbnailData, ownerID: entry.id)
         let storedViewPhoto = try viewPhotoFileStore.write(newViewPhotoData, ownerID: entry.id)
@@ -514,6 +512,8 @@ struct PhotoStore {
         entry.originalByteCount = storedOriginal.byteCount
         entry.originalContentHash = storedOriginal.contentHash
         entry.originalSyncState = .localOnly
+        entry.photoStorageVersion = PhotoEncoding.storageVersion
+        entry.originalCompactedFromHash = nil
 
         do {
             try modelContext.save()
@@ -544,6 +544,8 @@ struct PhotoStore {
             entry.originalByteCount = oldOriginalByteCount
             entry.originalContentHash = oldOriginalContentHash
             entry.originalSyncState = oldOriginalSyncState
+            entry.photoStorageVersion = oldStorageVersion
+            entry.originalCompactedFromHash = oldCompactedFromHash
             throw error
         }
 
@@ -701,12 +703,14 @@ struct PhotoStore {
                 else { id = UUID().uuidString }
                 usedIDs.insert(id)
                 try autoreleasepool {
-                    guard let data = metadata.imageFilename.flatMap({ contents.imageData(named: $0) }) ?? metadata.legacyImageData else {
+                    guard let verified = metadata.imageFilename.flatMap({ contents.imageData(named: $0) }) ?? metadata.legacyImageData else {
                         throw BackupError.damagedPhoto(metadata.dayKey ?? metadata.day.description)
                     }
-                    if let expected = metadata.imageSHA256, BackupArchiveReader.hash(data) != expected {
+                    if let expected = metadata.imageSHA256, BackupArchiveReader.hash(verified) != expected {
                         throw BackupError.damagedPhoto(metadata.imageFilename ?? id)
                     }
+                    // Verified bytes are re-encoded to the bounded storage format.
+                    let data = (try? PhotoEncoding.storedOriginal(from: verified)) ?? verified
                     let thumbnailData = try thumbnailData(from: data)
                     let viewData = try viewPhotoData(from: data)
                     let original = try originalFileStore.write(data, ownerID: id)
@@ -753,6 +757,8 @@ struct PhotoStore {
                 entry.originalContentHash = photo.original.contentHash
                 entry.originalByteCount = photo.original.byteCount
                 entry.originalSyncState = .localOnly
+                entry.photoStorageVersion = PhotoEncoding.storageVersion
+                entry.originalCompactedFromHash = nil
                 entry.localThumbnailFilename = photo.thumbnail.filename
                 entry.thumbnailContentHash = photo.thumbnail.contentHash
                 entry.thumbnailByteCount = photo.thumbnail.byteCount
@@ -1029,6 +1035,97 @@ struct PhotoStore {
         #endif
     }
 
+    /// Re-encodes stored originals that predate `PhotoEncoding.storageVersion`
+    /// into the bounded format, with a fresh view photo cut from the result.
+    ///
+    /// Each entry is swapped only after its new files are written and the save
+    /// succeeds; the old files go last. The hash of the replaced original is
+    /// kept in `originalCompactedFromHash` so the original-photo sync can tell
+    /// a sibling device's compaction of the same photo from a real conflict.
+    /// Entries with a sync transfer or conflict in progress are left alone
+    /// until a later launch.
+    @discardableResult
+    func compactLibraryIfNeeded(
+        for entries: [PhotoEntry],
+        in modelContext: ModelContext
+    ) async -> Int {
+        var compactedCount = 0
+        var pendingRemovals: [(original: String?, view: String?)] = []
+
+        func commit() {
+            guard (try? modelContext.save()) != nil else {
+                modelContext.rollback()
+                pendingRemovals.removeAll()
+                return
+            }
+            for removal in pendingRemovals {
+                try? originalFileStore.remove(filename: removal.original)
+                try? viewPhotoFileStore.remove(filename: removal.view)
+            }
+            pendingRemovals.removeAll()
+        }
+
+        for entry in entries where (entry.photoStorageVersion ?? 0) < PhotoEncoding.storageVersion {
+            guard !Task.isCancelled else { break }
+            guard entry.modelContext != nil, !entry.isDeleted,
+                  ![.conflict, .uploading, .downloading].contains(entry.originalSyncState),
+                  let filename = entry.localOriginalFilename,
+                  let data = try? originalFileStore.read(filename: filename) else { continue }
+
+            guard PhotoEncoding.isOverLimits(data) else {
+                entry.photoStorageVersion = PhotoEncoding.storageVersion
+                continue
+            }
+            let sourceHash = entry.originalContentHash ?? PhotoEncoding.hash(data)
+            let revision = originalRevision(entry)
+            let viewBefore = entry.localViewPhotoFilename
+            guard let compacted = await compactedRenditions(from: data) else {
+                // Undecodable bytes stay as they are; do not retry every launch.
+                entry.photoStorageVersion = PhotoEncoding.storageVersion
+                continue
+            }
+            // The entry may be edited, synced or deleted while encoding ran.
+            guard entry.modelContext != nil, !entry.isDeleted,
+                  originalRevision(entry) == revision,
+                  entry.localViewPhotoFilename == viewBefore,
+                  ![.conflict, .uploading, .downloading].contains(entry.originalSyncState),
+                  let storedOriginal = try? originalFileStore.write(compacted.original, ownerID: entry.id) else {
+                continue
+            }
+            guard let storedView = try? viewPhotoFileStore.write(compacted.viewPhoto, ownerID: entry.id) else {
+                if storedOriginal.filename != filename { try? originalFileStore.remove(filename: storedOriginal.filename) }
+                continue
+            }
+
+            entry.localOriginalFilename = storedOriginal.filename
+            entry.originalByteCount = storedOriginal.byteCount
+            entry.originalContentHash = storedOriginal.contentHash
+            entry.originalCompactedFromHash = sourceHash
+            entry.photoStorageVersion = PhotoEncoding.storageVersion
+            if entry.originalLastSyncedHash != nil {
+                _ = entry.transitionSyncState(for: .original, to: .pendingUpload)
+            }
+            entry.localViewPhotoFilename = storedView.filename
+            entry.viewPhotoByteCount = storedView.byteCount
+            entry.viewPhotoContentHash = storedView.contentHash
+            entry.viewPhotoModifiedAt = .now
+            entry.viewPhotoSyncState = .localOnly
+            invalidateCaches(for: entry)
+            pendingRemovals.append((
+                storedOriginal.filename == filename ? nil : filename,
+                storedView.filename == viewBefore ? nil : viewBefore
+            ))
+            compactedCount += 1
+            if compactedCount.isMultiple(of: 10) { commit() }
+            await Task.yield()
+        }
+        commit()
+        #if DEBUG
+        print("DAYMARK_PHOTO_COMPACTION_DONE compacted=\(compactedCount)")
+        #endif
+        return compactedCount
+    }
+
     func backfillLocationDetails(
         for entries: [PhotoEntry],
         in modelContext: ModelContext,
@@ -1202,75 +1299,45 @@ struct PhotoStore {
     }
 
     private func thumbnailData(from data: Data) throws -> Data {
-        try Self.renditionData(
-            from: data,
-            maxPixelSize: Thumbnail.maxPixelSize,
-            compressionQuality: Thumbnail.compressionQuality
-        )
+        try PhotoEncoding.rendition(from: data, profile: PhotoEncoding.thumbnail)
     }
 
     private func viewPhotoData(from data: Data) throws -> Data {
-        try Self.renditionData(
-            from: data,
-            maxPixelSize: ViewPhoto.maxPixelSize,
-            compressionQuality: ViewPhoto.compressionQuality
-        )
+        try PhotoEncoding.rendition(from: data, profile: PhotoEncoding.viewPhoto)
     }
 
-    /// Thumbnail and view-photo renditions for one original, decoded and
-    /// re-encoded off the main thread. Downsampling a 12-48 MP photo twice is
-    /// the slowest part of an import, and on the main actor it froze the UI.
-    private func renditions(from data: Data) async throws -> (thumbnail: Data, viewPhoto: Data) {
+    /// The stored original plus its thumbnail and view-photo renditions,
+    /// decoded and re-encoded off the main thread. Downsampling a 12-48 MP
+    /// photo is the slowest part of an import, and on the main actor it froze
+    /// the UI. Renditions are cut from the stored bytes, which are smaller.
+    private func storedRenditions(from data: Data) async throws -> (original: Data, thumbnail: Data, viewPhoto: Data) {
         try await Task.detached(priority: .userInitiated) {
-            let thumbnail = try Self.renditionData(
-                from: data,
-                maxPixelSize: Thumbnail.maxPixelSize,
-                compressionQuality: Thumbnail.compressionQuality
-            )
-            let viewPhoto = try Self.renditionData(
-                from: data,
-                maxPixelSize: ViewPhoto.maxPixelSize,
-                compressionQuality: ViewPhoto.compressionQuality
-            )
-            return (thumbnail, viewPhoto)
+            try autoreleasepool {
+                let original = try PhotoEncoding.storedOriginal(from: data)
+                let thumbnail = try PhotoEncoding.rendition(from: original, profile: PhotoEncoding.thumbnail)
+                let viewPhoto = try PhotoEncoding.rendition(from: original, profile: PhotoEncoding.viewPhoto)
+                return (original, thumbnail, viewPhoto)
+            }
         }.value
     }
 
     private func viewPhotoRendition(from data: Data) async -> Data? {
         await Task.detached(priority: .utility) {
-            try? Self.renditionData(
-                from: data,
-                maxPixelSize: ViewPhoto.maxPixelSize,
-                compressionQuality: ViewPhoto.compressionQuality
-            )
+            try? PhotoEncoding.rendition(from: data, profile: PhotoEncoding.viewPhoto)
         }.value
     }
 
-    private nonisolated static func renditionData(
-        from data: Data,
-        maxPixelSize: Double,
-        compressionQuality: CGFloat
-    ) throws -> Data {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
-            throw PhotoStoreError.invalidImageData
-        }
-
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
-        ]
-
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-            throw PhotoStoreError.invalidImageData
-        }
-
-        let image = UIImage(cgImage: cgImage)
-        guard let thumbnailData = image.jpegData(compressionQuality: compressionQuality) else {
-            throw PhotoStoreError.invalidImageData
-        }
-
-        return thumbnailData
+    /// Original and view-photo bytes re-encoded to the current storage format.
+    private func compactedRenditions(from data: Data) async -> (original: Data, viewPhoto: Data)? {
+        await Task.detached(priority: .utility) {
+            autoreleasepool {
+                guard let original = try? PhotoEncoding.storedOriginal(from: data),
+                      let viewPhoto = try? PhotoEncoding.rendition(from: original, profile: PhotoEncoding.viewPhoto) else {
+                    return nil
+                }
+                return (original, viewPhoto)
+            }
+        }.value
     }
 
     private func locationCoordinate(from data: Data) -> CLLocationCoordinate2D? {
