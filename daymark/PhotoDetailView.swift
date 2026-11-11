@@ -33,7 +33,7 @@ struct PhotoDetailView: View {
             .padding(.top, DaymarkSpacing.xs)
             .padding(.bottom, DaymarkSpacing.xxl)
         }
-        .daymarkScreen(backdrop: true)
+        .daymarkScreen()
         .daymarkNavigationTitle(entry.day.formatted(.dateTime.month(.wide).day().year()), inline: true)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -141,12 +141,11 @@ struct PhotoDetailView: View {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: DaymarkRadius.card, style: .continuous))
-                        .overlay { DaymarkGlassRim(cornerRadius: DaymarkRadius.card) }
-                        .shadow(color: DaymarkSwatch.heiSeBlack.opacity(0.18), radius: 18, x: 0, y: 10)
+                        .clipShape(RoundedRectangle(cornerRadius: DaymarkRadius.small, style: .continuous))
+                        .overlay { DaymarkHairline(cornerRadius: DaymarkRadius.small) }
                         .transition(.opacity)
                 } else {
-                    RoundedRectangle(cornerRadius: DaymarkRadius.card, style: .continuous)
+                    RoundedRectangle(cornerRadius: DaymarkRadius.small, style: .continuous)
                         .fill(DaymarkPalette.recessed)
                         .aspectRatio(1, contentMode: .fit)
                         .overlay {
@@ -264,9 +263,7 @@ struct PhotoDetailView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, DaymarkSpacing.xs)
         }
-        .buttonStyle(.glass)
-        .controlSize(.large)
-        .foregroundStyle(.red)
+        .buttonStyle(DaymarkBlockButtonStyle(color: .red))
     }
 
     private func metadataRow(flag: String?, title: String, value: String) -> some View {
@@ -280,9 +277,8 @@ struct PhotoDetailView: View {
                         .font(.system(size: 14, weight: .semibold))
                 }
             }
-            .foregroundStyle(DaymarkPalette.accent)
-            .frame(width: 36, height: 36)
-            .background(DaymarkPalette.accent.opacity(0.1), in: Circle())
+            .foregroundStyle(DaymarkPalette.ink)
+            .frame(width: 28, height: 28)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)

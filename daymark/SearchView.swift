@@ -94,7 +94,7 @@ struct SearchView: View {
             guard autoActivateSearch, didAutoActivateSearch, !isPresented else { return }
             dismiss()
         }
-        .daymarkScreen(backdrop: true)
+        .daymarkScreen()
     }
 
     // MARK: - Layout
@@ -110,8 +110,8 @@ struct SearchView: View {
     }
 
     private func layoutMetrics(for width: CGFloat, safeAreaInsets: EdgeInsets) -> SearchLayoutMetrics {
-        let horizontalPadding = DaymarkSpacing.s
-        let gridSpacing = 8.0
+        let horizontalPadding = 3.0
+        let gridSpacing = 3.0
         let bottomPadding = max(safeAreaInsets.bottom + 20, 28)
         let availableWidth = width - (horizontalPadding * 2) - (gridSpacing * 2)
         let cellSize = floor(availableWidth / 3)

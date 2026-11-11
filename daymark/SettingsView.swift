@@ -49,7 +49,7 @@ struct SettingsView: View {
                 .padding(.bottom, DaymarkSpacing.xxl)
                 .animation(DaymarkMotion.spring, value: isBusy)
             }
-            .daymarkScreen(backdrop: true)
+            .daymarkScreen()
             .daymarkNavigationTitle("Settings")
             .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
@@ -148,7 +148,7 @@ struct SettingsView: View {
                 }
             }
             .padding(3)
-            .background(DaymarkPalette.recessed.opacity(0.6), in: Capsule())
+            .background(DaymarkPalette.recessed, in: Capsule())
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -252,11 +252,11 @@ struct SettingsView: View {
                     if isSelected {
                         Capsule()
                             .fill(DaymarkPalette.surface)
-                            .shadow(color: DaymarkSwatch.heiSeBlack.opacity(0.12), radius: 4, y: 1)
+                            .overlay(Capsule().strokeBorder(DaymarkPalette.rule, lineWidth: 0.75))
                             .matchedGeometryEffect(id: "themeSelection", in: themeSelection)
                     }
                 }
-                .foregroundStyle(isSelected ? DaymarkPalette.accent : DaymarkPalette.secondaryInk)
+                .foregroundStyle(isSelected ? DaymarkPalette.ink : DaymarkPalette.secondaryInk)
                 .contentShape(Capsule())
         }
         .buttonStyle(DaymarkPressableButtonStyle(pressedScale: 0.92))

@@ -14,16 +14,17 @@ struct WelcomeView: View {
         VStack(spacing: 24) {
             Spacer()
 
-            Image(systemName: "book.closed.fill")
-                .font(.system(size: 52, weight: .medium))
-                .foregroundStyle(DaymarkPalette.buttonText)
-                .frame(width: 112, height: 112)
-                .background(DaymarkPalette.bloom, in: RoundedRectangle(cornerRadius: DaymarkRadius.panel, style: .continuous))
-                .overlay { DaymarkGlassRim(cornerRadius: DaymarkRadius.panel) }
-                .shadow(color: DaymarkSwatch.picoEggplant.opacity(0.35), radius: 24, y: 12)
-                .symbolEffect(.bounce, value: hasAppeared)
-                .scaleEffect(hasAppeared ? 1 : 0.85)
-                .opacity(hasAppeared ? 1 : 0)
+            // Today's date, struck through with the mark: the whole idea in one glyph.
+            ZStack {
+                Text(Date.now.formatted(.dateTime.day()))
+                    .font(.system(size: 120, weight: .regular, design: .serif))
+                    .foregroundStyle(DaymarkPalette.ink)
+
+                DaymarkStroke(length: 150, thickness: 5)
+                    .scaleEffect(x: hasAppeared ? 1 : 0, anchor: .leading)
+            }
+            .opacity(hasAppeared ? 1 : 0)
+            .accessibilityHidden(true)
 
             VStack(spacing: 10) {
                 Text("Welcome to Daymark")
@@ -60,9 +61,7 @@ struct WelcomeView: View {
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: 36)
                 }
-                .buttonStyle(.glass)
-                .controlSize(.large)
-                .foregroundStyle(DaymarkPalette.accent)
+                .buttonStyle(DaymarkBlockButtonStyle())
 
                 Text("You can sign in later from Settings. Signing in lets you personalize Daymark across your devices.")
                     .font(DaymarkTypography.metadata)
@@ -75,7 +74,7 @@ struct WelcomeView: View {
             .opacity(hasAppeared ? 1 : 0)
             .offset(y: hasAppeared ? 0 : 24)
         }
-        .daymarkScreen(backdrop: true)
+        .daymarkScreen()
         .onAppear {
             withAnimation(DaymarkMotion.spring.delay(0.1)) {
                 hasAppeared = true

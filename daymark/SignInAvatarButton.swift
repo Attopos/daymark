@@ -95,8 +95,7 @@ private struct ProfileView: View {
                             .frame(maxWidth: .infinity)
                             .frame(minHeight: 36)
                     }
-                    .buttonStyle(.glass)
-                    .controlSize(.large)
+                    .buttonStyle(DaymarkBlockButtonStyle())
                     .disabled(isDeleting)
 
                     Button(role: .destructive) {
@@ -112,9 +111,7 @@ private struct ProfileView: View {
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: 36)
                     }
-                    .buttonStyle(.glassProminent)
-                    .controlSize(.large)
-                    .tint(.red)
+                    .buttonStyle(DaymarkBlockButtonStyle(prominent: true, color: .red))
                     .disabled(isDeleting)
 
                     Text("Deleting your account signs you out and permanently removes all of your journal photos and data from this device and iCloud.")

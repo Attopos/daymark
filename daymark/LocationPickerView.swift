@@ -70,7 +70,7 @@ struct LocationPickerView: View {
                         .fontWeight(.medium)
                         .padding(.horizontal, DaymarkSpacing.m)
                         .padding(.vertical, DaymarkSpacing.s)
-                        .daymarkFloatingGlass(in: Capsule(), interactive: false)
+                        .daymarkFloatingGlass(in: Capsule())
                         .padding(.bottom, DaymarkSpacing.m)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                         .id(displayName)

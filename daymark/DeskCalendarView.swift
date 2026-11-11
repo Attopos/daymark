@@ -69,7 +69,7 @@ struct DeskCalendarView: View {
             .task(id: anchorID) {
                 prefetchNeighbours()
             }
-            .daymarkScreen(backdrop: true)
+            .daymarkScreen()
         }
     }
 
@@ -130,9 +130,6 @@ struct DeskCalendarView: View {
                 .contentTransition(.numericText())
                 .animation(DaymarkMotion.snappy, value: current)
                 .foregroundStyle(DaymarkPalette.secondaryInk)
-                .padding(.horizontal, DaymarkSpacing.s)
-                .padding(.vertical, 6)
-                .daymarkFloatingGlass(in: Capsule(), interactive: false)
         }
     }
 
@@ -348,7 +345,7 @@ private struct CalendarPage: View {
             Text(entry.day.formatted(.dateTime.day()))
                 .font(.system(size: 60, weight: .semibold, design: .serif))
                 .monospacedDigit()
-                .foregroundStyle(calendar.isDateInToday(entry.day) ? DaymarkPalette.highlight : DaymarkPalette.accent)
+                .foregroundStyle(calendar.isDateInToday(entry.day) ? DaymarkPalette.mark : DaymarkPalette.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
 
@@ -466,7 +463,7 @@ private struct CalendarBinding: View {
                 Capsule()
                     .strokeBorder(
                         LinearGradient(
-                            colors: [DaymarkSwatch.grauzone, DaymarkSwatch.siestaTan, DaymarkSwatch.grauzone],
+                            colors: [DaymarkPalette.metal, DaymarkPalette.metalHighlight, DaymarkPalette.metal],
                             startPoint: .leading,
                             endPoint: .trailing
                         ),
@@ -498,11 +495,7 @@ private struct DeskCalendarStand: View {
                 .offset(y: 10)
 
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(DaymarkPalette.bloom)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(DaymarkSwatch.heiSeBlack.opacity(0.25))
-                }
+                .fill(DaymarkPalette.stand)
                 .frame(width: pageSize.width + 12, height: pageSize.height + depth)
         }
         .frame(width: pageSize.width, height: pageSize.height + depth, alignment: .bottom)

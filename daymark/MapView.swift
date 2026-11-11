@@ -76,7 +76,7 @@ struct MapView: View {
                         .frame(width: 48, height: 48)
                         // Not interactive glass: over the Map it swallowed the
                         // button's tap. The button style supplies the press spring.
-                        .daymarkFloatingGlass(in: Circle(), interactive: false)
+                        .daymarkFloatingGlass(in: Circle())
                         .contentShape(Circle())
                 }
                 .buttonStyle(DaymarkPressableButtonStyle(pressedScale: 0.92))

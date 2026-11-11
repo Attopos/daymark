@@ -102,7 +102,7 @@ struct CalendarView: View {
                     .accessibilityLabel("Search Photos")
                 }
             }
-            .daymarkScreen(backdrop: true)
+            .daymarkScreen()
         }
         .task(id: locationBackfillKey) {
             guard scenePhase == .active else { return }
@@ -135,8 +135,7 @@ struct CalendarView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, DaymarkSpacing.xs)
                     }
-                    .buttonStyle(.glassProminent)
-                    .controlSize(.large)
+                    .buttonStyle(DaymarkBlockButtonStyle(prominent: true))
                     .disabled(selectedDateHasEntry)
                     .padding(.horizontal, DaymarkSpacing.m)
 
@@ -157,7 +156,7 @@ struct CalendarView: View {
                         }
                     }
                 }
-                .daymarkScreen(backdrop: true)
+                .daymarkScreen()
             }
             .presentationCornerRadius(DaymarkRadius.panel)
         }
@@ -275,10 +274,7 @@ struct CalendarView: View {
                         } label: {
                             ZStack {
                                 if hasEntry {
-                                    Rectangle()
-                                        .fill((isSelected ? Color.white : DaymarkPalette.ink).opacity(isSelected ? 0.95 : 0.75))
-                                        .frame(width: 24, height: 2.5)
-                                        .rotationEffect(.degrees(-18))
+                                    DaymarkStroke(color: isSelected ? DaymarkPalette.paper : DaymarkPalette.mark)
                                 }
 
                                 Text(dayNumberText(for: date))
@@ -289,7 +285,7 @@ struct CalendarView: View {
                             .background {
                                 if isSelected {
                                     Circle()
-                                        .fill(DaymarkPalette.accent.gradient)
+                                        .fill(DaymarkPalette.mark)
                                         .matchedGeometryEffect(id: "selectedDay", in: daySelection)
                                 }
                             }
@@ -306,7 +302,7 @@ struct CalendarView: View {
     }
 
     private func photoGrid(metrics: LayoutMetrics) -> some View {
-        LazyVStack(alignment: .leading, spacing: DaymarkSpacing.s, pinnedViews: [.sectionHeaders]) {
+        LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(photoGridMonths, id: \.self) { month in
                 Section {
                     LazyVGrid(columns: columns(for: metrics), spacing: metrics.gridSpacing) {
@@ -377,16 +373,14 @@ struct CalendarView: View {
         return PhotosPicker(selection: $selectedItem, matching: .images) {
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
-                    .fill(.ultraThinMaterial)
-
-                DaymarkGlassRim(cornerRadius: glassCornerRadius)
+                    .fill(DaymarkPalette.recessed.opacity(0.6))
 
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .top, spacing: 8 * overlayScale) {
                         VStack(alignment: .leading, spacing: overlayScale) {
                             Text("Today")
                                 .font(.system(size: tileDayFontSize * overlayScale, weight: .semibold, design: .serif))
-                                .foregroundStyle(DaymarkPalette.ink)
+                                .foregroundStyle(DaymarkPalette.mark)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.5)
                                 .allowsTightening(true)
@@ -404,8 +398,8 @@ struct CalendarView: View {
                     Spacer(minLength: 0)
 
                     Image(systemName: "plus")
-                        .font(.system(size: 24 * overlayScale, weight: .regular))
-                        .foregroundStyle(DaymarkPalette.accent)
+                        .font(.system(size: 24 * overlayScale, weight: .light))
+                        .foregroundStyle(DaymarkPalette.ink)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 }
                 .padding(8 * overlayScale)
@@ -456,7 +450,7 @@ struct CalendarView: View {
     }
 
     private func pastDaysGrid(metrics: LayoutMetrics) -> some View {
-        LazyVStack(alignment: .leading, spacing: DaymarkSpacing.s, pinnedViews: [.sectionHeaders]) {
+        LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(pastMonths, id: \.self) { month in
                 Section {
                     LazyVGrid(columns: columns(for: metrics), spacing: metrics.gridSpacing) {
@@ -497,9 +491,7 @@ struct CalendarView: View {
         ), matching: .images) {
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
-                    .fill(.ultraThinMaterial)
-
-                DaymarkGlassRim(cornerRadius: glassCornerRadius)
+                    .fill(DaymarkPalette.recessed.opacity(0.6))
 
                 VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: overlayScale) {
@@ -520,8 +512,8 @@ struct CalendarView: View {
                     Spacer(minLength: 0)
 
                     Image(systemName: "plus")
-                        .font(.system(size: 20 * overlayScale, weight: .medium))
-                        .foregroundStyle(DaymarkPalette.accent)
+                        .font(.system(size: 20 * overlayScale, weight: .light))
+                        .foregroundStyle(DaymarkPalette.secondaryInk)
                         .frame(maxWidth: .infinity, alignment: .center)
 
                     Spacer(minLength: 0)
@@ -620,8 +612,9 @@ struct CalendarView: View {
     }
 
     private func layoutMetrics(for width: CGFloat, safeAreaInsets: EdgeInsets) -> LayoutMetrics {
-        let horizontalPadding = DaymarkSpacing.s
-        let gridSpacing = gridColumnCount > 3 ? 4.0 : 8.0
+        // A tight, nearly edge-to-edge grid: the photographs carry the page.
+        let horizontalPadding = 3.0
+        let gridSpacing = gridColumnCount > 3 ? 2.0 : 3.0
         let topPadding = DaymarkSpacing.xxs
         let bottomPadding = max(safeAreaInsets.bottom + 20, 28)
         let safeWidth = width.isFinite ? max(width, 0) : 0
@@ -726,14 +719,14 @@ struct CalendarView: View {
 
     private func dayForegroundStyle(isSelected: Bool, isToday: Bool, hasEntry: Bool) -> Color {
         if isSelected {
-            return .white
+            return DaymarkPalette.paper
         }
 
         if hasEntry {
             return DaymarkPalette.secondaryInk
         }
 
-        return isToday ? DaymarkPalette.accent : DaymarkPalette.ink
+        return isToday ? DaymarkPalette.mark : DaymarkPalette.ink
     }
 }
 
@@ -808,7 +801,7 @@ struct MarkCard: View {
             ZStack {
                 EntryThumbnail(entry: entry) {
                     ZStack {
-                        Rectangle().fill(.ultraThinMaterial)
+                        Rectangle().fill(DaymarkPalette.recessed)
 
                         Image(systemName: "photo")
                             .font(.system(size: 20 * overlayScale, weight: .medium))
@@ -863,9 +856,8 @@ struct MarkCard: View {
             }
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous))
-            .overlay { DaymarkGlassRim(cornerRadius: glassCornerRadius) }
+            .overlay { DaymarkHairline(cornerRadius: glassCornerRadius) }
             .contentShape(RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous))
-            .shadow(color: DaymarkSwatch.heiSeBlack.opacity(0.16), radius: 8, x: 0, y: 4)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accessibilityDescription)
         }

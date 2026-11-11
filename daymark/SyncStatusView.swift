@@ -265,7 +265,7 @@ struct ICloudSyncDetailView: View {
                     .frame(minHeight: 180)
             }
             Button(actionTitle, action: action)
-                .buttonStyle(.glassProminent)
+                .buttonStyle(DaymarkPrimaryButtonStyle())
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
