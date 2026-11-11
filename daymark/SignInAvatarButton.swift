@@ -131,6 +131,7 @@ private struct ProfileView: View {
                     Button("Done") { dismiss() }
                         .disabled(isDeleting)
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .confirmationDialog(
                 "Delete Account?",

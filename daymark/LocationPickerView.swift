@@ -53,6 +53,7 @@ struct LocationPickerView: View {
                         MapCompass()
                     }
                     .mapScope(mapScope)
+                    .daymarkEInk()
                     .onMapCameraChange { context in
                         visibleRegion = context.region
                     }
@@ -123,6 +124,7 @@ struct LocationPickerView: View {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Confirm") {
                         guard let coordinate = selectedCoordinate else { return }
@@ -137,6 +139,7 @@ struct LocationPickerView: View {
                     }
                     .disabled(selectedCoordinate == nil || isResolvingLocation)
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
         }
     }

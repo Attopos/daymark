@@ -53,7 +53,7 @@ struct MapView: View {
             // mesh tiles, which is the heaviest thing MapKit can draw.
             .mapStyle(showsSatellite
                 ? .hybrid(elevation: .flat)
-                : .standard(elevation: .realistic))
+                : .standard(elevation: .flat, emphasis: .muted))
             .mapControls {
                 MapUserLocationButton(scope: mapScope)
                     .accessibilityLabel("Show Current Location")
@@ -61,6 +61,8 @@ struct MapView: View {
                 MapScaleView()
             }
             .mapScope(mapScope)
+            // The map itself is drawn as on an e-ink panel: greyscale.
+            .daymarkEInk()
             .daymarkScreen()
             .daymarkNavigationTitle("Maps")
             .toolbarTitleDisplayMode(.inlineLarge)

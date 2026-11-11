@@ -52,6 +52,7 @@ struct PhotoDetailView: View {
                 }
                 .accessibilityLabel("Replace Photo")
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .onChange(of: selectedItem) { _, newItem in
             guard let newItem else { return }

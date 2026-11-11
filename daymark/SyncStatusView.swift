@@ -220,6 +220,7 @@ struct ICloudSyncDetailView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { selectedConflict = nil }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .confirmationDialog(
                 resolutionTitle,

@@ -18,10 +18,10 @@ final class daymarkUITests: XCTestCase {
             app.launchArguments = ["-hasCompletedWelcome", "YES", "-prefersDarkMode", darkMode ? "YES" : "NO"]
             app.launch()
             for title in ["Calendar", "Maps", "Daily", "Settings"] {
-                XCTAssertTrue(app.tabBars.buttons[title].waitForExistence(timeout: 10), title)
+                XCTAssertTrue(app.buttons["tab-\(title)"].waitForExistence(timeout: 10), title)
             }
             for title in ["Calendar", "Daily"] {
-                app.tabBars.buttons[title].tap()
+                app.buttons["tab-\(title)"].tap()
                 let heading = title == "Calendar" ? "Daymark" : title
                 XCTAssertTrue(app.navigationBars[heading].waitForExistence(timeout: 5))
                 let attachment = XCTAttachment(screenshot: app.screenshot())
@@ -29,7 +29,7 @@ final class daymarkUITests: XCTestCase {
                 attachment.lifetime = .keepAlways
                 add(attachment)
             }
-            app.tabBars.buttons["Settings"].tap()
+            app.buttons["tab-Settings"].tap()
             XCTAssertTrue(app.buttons["Import"].waitForExistence(timeout: 5))
             XCTAssertTrue(app.buttons["Export"].exists)
             XCTAssertTrue(app.staticTexts["Backup"].exists)
@@ -46,8 +46,8 @@ final class daymarkUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-hasCompletedWelcome", "YES", "-uiTestSeedPhoto"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 10))
-        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue(app.buttons["tab-Settings"].waitForExistence(timeout: 10))
+        app.buttons["tab-Settings"].tap()
         let export = app.buttons["Export"]
         XCTAssertTrue(export.waitForExistence(timeout: 5))
         let enabled = NSPredicate(format: "isEnabled == true")
@@ -79,7 +79,7 @@ final class daymarkUITests: XCTestCase {
         }
         app.launch()
 
-        app.tabBars.buttons["Maps"].tap()
+        app.buttons["tab-Maps"].tap()
         let toggle = app.buttons["mapStyleToggle"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 10))
         if app.alerts["Location Access Needed"].exists {
@@ -105,7 +105,7 @@ final class daymarkUITests: XCTestCase {
         }
 
         // The tab bar must still respond after the map has loaded.
-        app.tabBars.buttons["Calendar"].tap()
+        app.buttons["tab-Calendar"].tap()
         XCTAssertTrue(app.navigationBars["Daymark"].waitForExistence(timeout: 5))
     }
 

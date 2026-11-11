@@ -61,10 +61,12 @@ struct PhotoEditView: View {
                     Button("Cancel") { dismiss() }
                         .foregroundStyle(.white)
                 }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { applyAndSave() }
                         .fontWeight(.semibold)
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         }

@@ -2,35 +2,128 @@ import SwiftData
 import SwiftUI
 import UIKit
 
+enum DaymarkTab: String, CaseIterable, Identifiable {
+    case calendar, maps, daily, settings
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .calendar: "Calendar"
+        case .maps: "Maps"
+        case .daily: "Daily"
+        case .settings: "Settings"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .calendar: "calendar"
+        case .maps: "map"
+        case .daily: "rectangle.stack"
+        case .settings: "gearshape"
+        }
+    }
+}
+
+/// Daymark's own tab bar: opaque paper under a one-point ink rule, with the
+/// selected tab printed in reverse, as on an e-ink reader. No glass, no motion.
+struct DaymarkTabBar: View {
+    @Binding var selection: DaymarkTab
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(DaymarkTab.allCases) { tab in
+                let isSelected = tab == selection
+
+                Button {
+                    selection = tab
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: tab.symbol)
+                            .font(.system(size: 19, weight: .regular))
+                            .frame(height: 22)
+                        Text(tab.title)
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(0.4)
+                    }
+                    .foregroundStyle(isSelected ? DaymarkPalette.paper : DaymarkPalette.ink)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: DaymarkRadius.tile, style: .continuous)
+                                .fill(DaymarkPalette.ink)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tab.title)
+                .accessibilityIdentifier("tab-\(tab.title)")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .padding(.horizontal, DaymarkSpacing.s)
+        .padding(.top, 6)
+        .padding(.bottom, 2)
+        .background(DaymarkPalette.paper.ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) {
+            Rectangle().fill(DaymarkPalette.ink).frame(height: 1)
+        }
+    }
+}
+
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppDataController.self) private var dataController
     @AppStorage("prefersDarkMode") private var prefersDarkMode = false
     @Query private var entries: [PhotoEntry]
     @State private var isRunningAssetSync = false
+    @State private var selectedTab = DaymarkTab.calendar
+    @State private var isKeyboardVisible = false
     private let photoStore = PhotoStore()
 
     var body: some View {
-        TabView {
-            Tab("Calendar", systemImage: "calendar") {
-                CalendarView()
+        // The system tab bar is glass, so it is hidden and Daymark draws its
+        // own opaque bar underneath. TabView still keeps each tab's state.
+        VStack(spacing: 0) {
+            TabView(selection: $selectedTab) {
+                Tab(DaymarkTab.calendar.title, systemImage: DaymarkTab.calendar.symbol, value: DaymarkTab.calendar) {
+                    CalendarView()
+                        .toolbarVisibility(.hidden, for: .tabBar)
+                }
+
+                Tab(DaymarkTab.maps.title, systemImage: DaymarkTab.maps.symbol, value: DaymarkTab.maps) {
+                    MapView()
+                        .toolbarVisibility(.hidden, for: .tabBar)
+                }
+
+                Tab(DaymarkTab.daily.title, systemImage: DaymarkTab.daily.symbol, value: DaymarkTab.daily) {
+                    DeskCalendarView()
+                        .toolbarVisibility(.hidden, for: .tabBar)
+                }
+
+                Tab(DaymarkTab.settings.title, systemImage: DaymarkTab.settings.symbol, value: DaymarkTab.settings) {
+                    SettingsView(prefersDarkMode: $prefersDarkMode)
+                        .toolbarVisibility(.hidden, for: .tabBar)
+                }
             }
 
-            Tab("Maps", systemImage: "map") {
-                MapView()
+            // Out of the way while typing, so it does not ride up on the keyboard.
+            if !isKeyboardVisible {
+                DaymarkTabBar(selection: $selectedTab)
             }
-
-            Tab("Daily", systemImage: "rectangle.stack") {
-                DeskCalendarView()
-            }
-
-            Tab("Settings", systemImage: "gearshape") {
-                SettingsView(prefersDarkMode: $prefersDarkMode)
-            }
+        }
+        .background(DaymarkPalette.paper.ignoresSafeArea())
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            isKeyboardVisible = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            isKeyboardVisible = false
         }
         .tint(DaymarkPalette.accent)
         .buttonBorderShape(.capsule)
-        .tabBarMinimizeBehavior(.onScrollDown)
         .preferredColorScheme(prefersDarkMode ? .dark : .light)
         .task(id: assetSyncKey) {
             try? await Task.sleep(for: .milliseconds(300))

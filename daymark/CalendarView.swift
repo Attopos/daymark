@@ -73,6 +73,7 @@ struct CalendarView: View {
                     }
                     .accessibilityLabel("Add Daymark")
                 }
+                .sharedBackgroundVisibility(.hidden)
 
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -94,6 +95,7 @@ struct CalendarView: View {
                     }
                     .accessibilityLabel("Filter")
                 }
+                .sharedBackgroundVisibility(.hidden)
 
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
@@ -103,6 +105,7 @@ struct CalendarView: View {
                     }
                     .accessibilityLabel("Search Photos")
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .daymarkScreen()
         }
@@ -169,6 +172,7 @@ struct CalendarView: View {
                             showingAddSheet = false
                         }
                     }
+                    .sharedBackgroundVisibility(.hidden)
                 }
                 .daymarkScreen()
             }

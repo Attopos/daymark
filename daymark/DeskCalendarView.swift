@@ -51,6 +51,7 @@ struct DeskCalendarView: View {
                         }
                         .accessibilityLabel("Latest daymark")
                     }
+                    .sharedBackgroundVisibility(.hidden)
                 }
             }
             .navigationDestination(item: $selectedEntry) { entry in
