@@ -56,6 +56,9 @@ struct SettingsView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     SignInAvatarButton()
                 }
+                // The avatar draws its own circle; the toolbar's glass capsule
+                // would otherwise clip it into a cropped bubble.
+                .sharedBackgroundVisibility(.hidden)
             }
             .onDisappear {
                 // Switching tabs must not abort a running export or restore;

@@ -32,18 +32,23 @@ struct SignInAvatarButton: View {
                 Text(initials)
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(DaymarkPalette.buttonText)
-                    .frame(width: 40, height: 40)
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+                    .frame(width: Self.size, height: Self.size)
                     .background(DaymarkPalette.buttonFill, in: Circle())
             } else {
-                Image(systemName: "person.crop.circle.fill")
-                    .font(.system(size: 18, weight: .semibold))
+                Image(systemName: "person.fill")
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(DaymarkPalette.accent)
-                    .frame(width: 40, height: 40)
-                    .background(DaymarkPalette.accent.opacity(0.08), in: Circle())
-                    .overlay(Circle().strokeBorder(DaymarkPalette.rule, lineWidth: 0.75))
+                    .frame(width: Self.size, height: Self.size)
+                    .glassEffect(.regular.interactive(), in: Circle())
             }
         }
+        .clipShape(Circle())
+        .contentShape(Circle())
     }
+
+    private static let size: CGFloat = 36
 }
 
 private struct ProfileView: View {
