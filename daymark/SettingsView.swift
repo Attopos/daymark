@@ -103,7 +103,7 @@ struct SettingsView: View {
                 switch result {
                 case .success:
                     lastExportTimestamp = Date.now.timeIntervalSince1970
-                    statusMessage = "Complete backup saved. If you chose Google Drive, check Drive for upload completion."
+                    statusMessage = "Backup saved."
                 case .failure(let error):
                     errorMessage = error.localizedDescription
                 }
@@ -112,7 +112,7 @@ struct SettingsView: View {
             } onCancellation: {
                 exportItem?.cleanUp()
                 exportItem = nil
-                statusMessage = "Export cancelled. Your photos are unchanged."
+                statusMessage = "Export cancelled."
             }
             .fileImporter(
                 isPresented: $showingImporter,
@@ -163,12 +163,8 @@ struct SettingsView: View {
                     Text("iCloud Sync")
                         .font(DaymarkTypography.entryTitle)
 
-                    if FileManager.default.ubiquityIdentityToken != nil {
-                        Text("Photos sync across your devices")
-                            .font(DaymarkTypography.metadata)
-                            .foregroundStyle(DaymarkPalette.secondaryInk)
-                    } else {
-                        Text("Sign in to iCloud to enable sync")
+                    if FileManager.default.ubiquityIdentityToken == nil {
+                        Text("Not signed in to iCloud")
                             .font(DaymarkTypography.metadata)
                             .foregroundStyle(DaymarkPalette.secondaryInk)
                     }
@@ -224,12 +220,8 @@ struct SettingsView: View {
                 }
             }
 
-            Text("Export includes original photos, dates, locations and captions. Choose Google Drive in Files to keep an independent copy.")
-                .font(.footnote)
-                .foregroundStyle(DaymarkPalette.secondaryInk)
-
             if lastExportTimestamp > 0 {
-                Text("Last complete export: \(Date(timeIntervalSince1970: lastExportTimestamp).formatted(date: .abbreviated, time: .shortened))")
+                Text("Last export: \(Date(timeIntervalSince1970: lastExportTimestamp).formatted(date: .abbreviated, time: .shortened))")
                     .font(.footnote)
                     .foregroundStyle(DaymarkPalette.secondaryInk)
             }
@@ -306,7 +298,7 @@ struct SettingsView: View {
             } catch is CancellationError {
                 exportItem?.cleanUp()
                 exportItem = nil
-                statusMessage = "Export cancelled. Your photos are unchanged."
+                statusMessage = "Export cancelled."
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -330,7 +322,7 @@ struct SettingsView: View {
                 pendingBackup = contents
                 showingImportOptions = true
             } catch is CancellationError {
-                statusMessage = "Import cancelled. Your photos are unchanged."
+                statusMessage = "Import cancelled."
             } catch { errorMessage = error.localizedDescription }
         }
     }
@@ -374,7 +366,7 @@ struct SettingsView: View {
                 // Local restore is complete. The existing sync engine handles
                 // optional iCloud sync independently when it next runs.
             } catch is CancellationError {
-                statusMessage = "Import cancelled. Your photos are unchanged."
+                statusMessage = "Import cancelled."
             } catch { errorMessage = error.localizedDescription }
         }
     }

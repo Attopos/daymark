@@ -160,8 +160,6 @@ struct ICloudSyncDetailView: View {
             }
         } header: {
             Text("Photo Conflicts")
-        } footer: {
-            Text("Daymark keeps both files until you choose a version.")
         }
     }
 
