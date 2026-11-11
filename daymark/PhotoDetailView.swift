@@ -29,7 +29,7 @@ struct PhotoDetailView: View {
                 deleteSection
                     .padding(.top, DaymarkSpacing.xs)
             }
-            .padding(.horizontal, DaymarkSpacing.m)
+            .padding(.horizontal, DaymarkSpacing.l)
             .padding(.top, DaymarkSpacing.xs)
             .padding(.bottom, DaymarkSpacing.xxl)
         }

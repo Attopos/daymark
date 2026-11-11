@@ -640,9 +640,9 @@ struct CalendarView: View {
     }
 
     private func layoutMetrics(for width: CGFloat, safeAreaInsets: EdgeInsets) -> LayoutMetrics {
-        // A tight, nearly edge-to-edge grid: the photographs carry the page.
-        let horizontalPadding = 3.0
-        let gridSpacing = gridColumnCount > 3 ? 2.0 : 3.0
+        // The grid shares the page margin with the title and month headings.
+        let horizontalPadding = DaymarkSpacing.l
+        let gridSpacing = gridColumnCount > 3 ? 3.0 : 6.0
         let topPadding = DaymarkSpacing.xxs
         let bottomPadding = max(safeAreaInsets.bottom + 20, 28)
         let safeWidth = width.isFinite ? max(width, 0) : 0
@@ -840,7 +840,6 @@ struct MarkCard: View {
                 }
                 .frame(width: size, height: size)
                 .clipped()
-                .daymarkEInk()
 
                 VStack(spacing: 0) {
                     HStack(alignment: .top, spacing: 8 * overlayScale) {
@@ -873,15 +872,11 @@ struct MarkCard: View {
 
                         Spacer(minLength: 0)
 
-                        // A greyscale flag says nothing, so the tile carries the country code.
-                        if flagEmoji != nil, let code = LocationGeocoder.normalizedCountryCode(entry.countryCode) {
-                            Text(code)
-                                .font(.system(size: metadataFontSize * overlayScale, weight: .semibold))
-                                .tracking(0.6)
-                                .foregroundStyle(DaymarkPalette.ink)
-                                .padding(.horizontal, 4 * overlayScale)
-                                .padding(.vertical, 2 * overlayScale)
-                                .background(DaymarkPalette.paper)
+                        if let flagEmoji {
+                            Text(flagEmoji)
+                                .font(.system(size: 13 * overlayScale))
+                                .frame(width: 24 * overlayScale, height: 24 * overlayScale)
+                                .background(DaymarkPalette.paper, in: Circle())
                                 .fixedSize()
                         }
                     }

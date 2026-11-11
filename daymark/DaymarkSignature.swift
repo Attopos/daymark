@@ -241,7 +241,6 @@ struct DaymarkMonthHeader: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 17)
         .padding(.top, DaymarkSpacing.l)
         .padding(.bottom, DaymarkSpacing.xxs)
         .frame(maxWidth: .infinity, alignment: .leading)

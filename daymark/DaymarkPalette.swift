@@ -158,8 +158,8 @@ extension View {
             }
     }
 
-    /// Renders a thumbnail the way an e-ink panel would: greyscale with a
-    /// little extra contrast. Full-size photographs keep their colour.
+    /// Renders a map the way an e-ink panel would: greyscale with a little
+    /// extra contrast. Photographs and flags always keep their colour.
     func daymarkEInk() -> some View {
         self
             .saturation(0)
