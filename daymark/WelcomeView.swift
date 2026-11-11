@@ -4,6 +4,7 @@ import SwiftUI
 struct WelcomeView: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(\.colorScheme) private var colorScheme
+    @State private var hasAppeared = false
 
     /// Called when the user has finished onboarding, either by signing in or
     /// choosing to continue without an account.
@@ -14,8 +15,15 @@ struct WelcomeView: View {
             Spacer()
 
             Image(systemName: "book.closed.fill")
-                .font(.system(size: 64))
-                .foregroundStyle(DaymarkPalette.accent)
+                .font(.system(size: 52, weight: .medium))
+                .foregroundStyle(DaymarkPalette.buttonText)
+                .frame(width: 112, height: 112)
+                .background(DaymarkPalette.bloom, in: RoundedRectangle(cornerRadius: DaymarkRadius.panel, style: .continuous))
+                .overlay { DaymarkGlassRim(cornerRadius: DaymarkRadius.panel) }
+                .shadow(color: DaymarkSwatch.picoEggplant.opacity(0.35), radius: 24, y: 12)
+                .symbolEffect(.bounce, value: hasAppeared)
+                .scaleEffect(hasAppeared ? 1 : 0.85)
+                .opacity(hasAppeared ? 1 : 0)
 
             VStack(spacing: 10) {
                 Text("Welcome to Daymark")
@@ -41,7 +49,8 @@ struct WelcomeView: View {
                     }
                 }
                 .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
-                .frame(height: 50)
+                .frame(height: 52)
+                .clipShape(Capsule())
 
                 Button {
                     onFinish()
@@ -49,12 +58,11 @@ struct WelcomeView: View {
                     Text("Continue Without Account")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
+                        .frame(minHeight: 36)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.glass)
+                .controlSize(.large)
                 .foregroundStyle(DaymarkPalette.accent)
-                .background(DaymarkPalette.surface, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(DaymarkPalette.rule, lineWidth: 0.75))
 
                 Text("You can sign in later from Settings. Signing in lets you personalize Daymark across your devices.")
                     .font(DaymarkTypography.metadata)
@@ -62,10 +70,17 @@ struct WelcomeView: View {
                     .multilineTextAlignment(.center)
                     .padding(.top, 4)
             }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 32)
+            .padding(.horizontal, DaymarkSpacing.xxl)
+            .padding(.bottom, DaymarkSpacing.xxl)
+            .opacity(hasAppeared ? 1 : 0)
+            .offset(y: hasAppeared ? 0 : 24)
         }
-        .daymarkScreen()
+        .daymarkScreen(backdrop: true)
+        .onAppear {
+            withAnimation(DaymarkMotion.spring.delay(0.1)) {
+                hasAppeared = true
+            }
+        }
         .interactiveDismissDisabled()
     }
 }

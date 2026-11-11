@@ -8,6 +8,7 @@ struct SettingsView: View {
     @Query(sort: \PhotoEntry.day, order: .reverse) private var entries: [PhotoEntry]
 
     @Binding var prefersDarkMode: Bool
+    @Namespace private var themeSelection
     private let photoStore = PhotoStore()
 
     @State private var showingExporter = false
@@ -38,15 +39,17 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 18) {
+                VStack(spacing: DaymarkSpacing.m) {
                     appearanceCard
                     iCloudSyncCard
                     libraryCard
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 20)
+                .padding(.horizontal, DaymarkSpacing.m)
+                .padding(.top, DaymarkSpacing.xs)
+                .padding(.bottom, DaymarkSpacing.xxl)
+                .animation(DaymarkMotion.spring, value: isBusy)
             }
-            .daymarkScreen()
+            .daymarkScreen(backdrop: true)
             .daymarkNavigationTitle("Settings")
             .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
@@ -125,18 +128,14 @@ struct SettingsView: View {
 
     private var appearanceCard: some View {
         HStack(spacing: 14) {
-            Image(systemName: "circle.lefthalf.filled")
-                .font(.system(size: 18, weight: .semibold))
-                .frame(width: 40, height: 40)
-                .background(DaymarkPalette.accent.opacity(0.08), in: Circle())
-                .foregroundStyle(DaymarkPalette.accent)
+            DaymarkIconBadge(systemName: "circle.lefthalf.filled")
 
             Text("Theme")
                 .font(DaymarkTypography.entryTitle)
 
             Spacer()
 
-            HStack(spacing: 8) {
+            HStack(spacing: 2) {
                 themeButton(systemName: "sun.max.fill", isSelected: !prefersDarkMode) {
                     prefersDarkMode = false
                 }
@@ -145,10 +144,12 @@ struct SettingsView: View {
                     prefersDarkMode = true
                 }
             }
+            .padding(3)
+            .background(DaymarkPalette.recessed.opacity(0.6), in: Capsule())
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .daymarkSurface(cornerRadius: 24)
+        .daymarkSurface()
     }
 
     private var iCloudSyncCard: some View {
@@ -156,11 +157,7 @@ struct SettingsView: View {
             ICloudSyncDetailView()
         } label: {
             HStack(spacing: 14) {
-                Image(systemName: "icloud.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 40, height: 40)
-                    .background(DaymarkPalette.accent.opacity(0.08), in: Circle())
-                    .foregroundStyle(DaymarkPalette.accent)
+                DaymarkIconBadge(systemName: "icloud.fill")
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("iCloud Sync")
@@ -185,19 +182,15 @@ struct SettingsView: View {
             }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .daymarkSurface(cornerRadius: 24)
+            .daymarkSurface()
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DaymarkPressableButtonStyle(pressedScale: 0.98))
     }
 
     private var libraryCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 14) {
-                Image(systemName: "externaldrive.fill.badge.icloud")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 40, height: 40)
-                    .background(DaymarkPalette.accent.opacity(0.08), in: Circle())
-                    .foregroundStyle(DaymarkPalette.accent)
+                DaymarkIconBadge(systemName: "externaldrive.fill.badge.icloud")
 
                 Text("Backup")
                     .font(DaymarkTypography.entryTitle)
@@ -249,19 +242,30 @@ struct SettingsView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .daymarkSurface(cornerRadius: 24)
+        .daymarkSurface()
     }
 
     private func themeButton(systemName: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button {
+            withAnimation(DaymarkMotion.snappy, action)
+        } label: {
             Image(systemName: systemName)
                 .font(.system(size: 15, weight: .semibold))
-                .frame(width: 34, height: 34)
-                .background(isSelected ? DaymarkPalette.accent.opacity(0.10) : Color.clear, in: Circle())
-                .overlay(Circle().strokeBorder(isSelected ? DaymarkPalette.accent.opacity(0.24) : DaymarkPalette.rule, lineWidth: 0.75))
+                .symbolEffect(.bounce, value: isSelected)
+                .frame(width: 40, height: 32)
+                .background {
+                    if isSelected {
+                        Capsule()
+                            .fill(DaymarkPalette.surface)
+                            .shadow(color: DaymarkSwatch.heiSeBlack.opacity(0.12), radius: 4, y: 1)
+                            .matchedGeometryEffect(id: "themeSelection", in: themeSelection)
+                    }
+                }
                 .foregroundStyle(isSelected ? DaymarkPalette.accent : DaymarkPalette.secondaryInk)
+                .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DaymarkPressableButtonStyle(pressedScale: 0.92))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var defaultBackupFilename: String {

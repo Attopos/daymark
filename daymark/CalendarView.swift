@@ -25,6 +25,8 @@ struct CalendarView: View {
     @ScaledMetric(relativeTo: .headline) private var tileDayFontSize: CGFloat = 16
     @ScaledMetric(relativeTo: .caption2) private var tileMetadataFontSize: CGFloat = 10
 
+    @Namespace private var daySelection
+
     private let calendar = Calendar.current
     private let gridColumnOptions = [2, 3, 5, 7]
 
@@ -40,17 +42,18 @@ struct CalendarView: View {
                                 .padding(.horizontal, metrics.horizontalPadding)
                                 .padding(.top, metrics.topPadding)
                                 .padding(.bottom, metrics.bottomPadding)
+                                .transition(.opacity.combined(with: .scale(scale: 0.98)))
                         } else {
                             photoGrid(metrics: metrics)
                                 .padding(.horizontal, metrics.horizontalPadding)
                                 .padding(.top, metrics.topPadding)
                                 .padding(.bottom, metrics.bottomPadding)
+                                .transition(.opacity.combined(with: .scale(scale: 0.98)))
                         }
                     }
                     .simultaneousGesture(gridMagnificationGesture)
                 }
             }
-            .background { GlassBackdrop() }
             .daymarkNavigationTitle("Daymark")
             .toolbarTitleDisplayMode(.inlineLarge)
             .navigationDestination(for: PhotoEntry.self) { entry in
@@ -72,7 +75,7 @@ struct CalendarView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button {
-                            withAnimation {
+                            withAnimation(DaymarkMotion.spring) {
                                 showPastDays.toggle()
                                 if showPastDays {
                                     pastDaysMonthCount = 12
@@ -99,7 +102,7 @@ struct CalendarView: View {
                     .accessibilityLabel("Search Photos")
                 }
             }
-            .daymarkScreen()
+            .daymarkScreen(backdrop: true)
         }
         .task(id: locationBackfillKey) {
             guard scenePhase == .active else { return }
@@ -120,19 +123,22 @@ struct CalendarView: View {
         }
         .sheet(isPresented: $showingAddSheet) {
             NavigationStack {
-                VStack(spacing: 20) {
+                VStack(spacing: DaymarkSpacing.l) {
                     addDaymarkCalendar
-                        .padding(.horizontal)
+                        .padding(DaymarkSpacing.s)
+                        .daymarkSurface()
+                        .padding(.horizontal, DaymarkSpacing.m)
 
                     PhotosPicker(selection: $addSheetPhotoItem, matching: .images) {
                         Text(selectedDateHasEntry ? "Date Already Has Daymark" : "Choose Photo")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
+                            .padding(.vertical, DaymarkSpacing.xs)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
+                    .controlSize(.large)
                     .disabled(selectedDateHasEntry)
-                    .padding(.horizontal)
+                    .padding(.horizontal, DaymarkSpacing.m)
 
                     if selectedDateHasEntry {
                         Text("Pick a date without a daymark.")
@@ -140,6 +146,8 @@ struct CalendarView: View {
                             .foregroundStyle(DaymarkPalette.secondaryInk)
                     }
                 }
+                .frame(maxHeight: .infinity, alignment: .top)
+                .padding(.top, DaymarkSpacing.xs)
                 .daymarkNavigationTitle("Add Daymark", inline: true)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -149,8 +157,9 @@ struct CalendarView: View {
                         }
                     }
                 }
-                .daymarkScreen()
+                .daymarkScreen(backdrop: true)
             }
+            .presentationCornerRadius(DaymarkRadius.panel)
         }
         .sheet(item: $pendingLocationImport, onDismiss: {
             pendingLocationImport = nil
@@ -260,7 +269,9 @@ struct CalendarView: View {
                         let hasEntry = hasEntry(on: date)
 
                         Button {
-                            addSheetDate = date
+                            withAnimation(DaymarkMotion.snappy) {
+                                addSheetDate = date
+                            }
                         } label: {
                             ZStack {
                                 if hasEntry {
@@ -276,11 +287,14 @@ struct CalendarView: View {
                             }
                             .frame(maxWidth: .infinity, minHeight: 36)
                             .background {
-                                Circle()
-                                    .fill(isSelected ? DaymarkPalette.accent : .clear)
+                                if isSelected {
+                                    Circle()
+                                        .fill(DaymarkPalette.accent.gradient)
+                                        .matchedGeometryEffect(id: "selectedDay", in: daySelection)
+                                }
                             }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(DaymarkPressableButtonStyle(pressedScale: 0.9))
                     } else {
                         Color.clear
                             .frame(maxWidth: .infinity, minHeight: 36)
@@ -292,7 +306,7 @@ struct CalendarView: View {
     }
 
     private func photoGrid(metrics: LayoutMetrics) -> some View {
-        LazyVStack(alignment: .leading, spacing: 16) {
+        LazyVStack(alignment: .leading, spacing: DaymarkSpacing.s, pinnedViews: [.sectionHeaders]) {
             ForEach(photoGridMonths, id: \.self) { month in
                 Section {
                     LazyVGrid(columns: columns(for: metrics), spacing: metrics.gridSpacing) {
@@ -306,7 +320,7 @@ struct CalendarView: View {
                                 NavigationLink(value: entry) {
                                     photoTile(for: entry, size: metrics.cellSize)
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(DaymarkPressableButtonStyle())
 
                             case .gap(let id):
                                 gapTile(id: id, size: metrics.cellSize)
@@ -314,9 +328,7 @@ struct CalendarView: View {
                         }
                     }
                 } header: {
-                    Text(month.formatted(.dateTime.month(.wide).year()))
-                        .font(DaymarkTypography.sectionTitle)
-                        .padding(.top, 8)
+                    DaymarkSectionHeader(title: month.formatted(.dateTime.month(.wide).year()))
                 }
             }
         }
@@ -360,13 +372,14 @@ struct CalendarView: View {
 
     private func addMarkTile(size: CGFloat) -> some View {
         let overlayScale = min(size / 120, 1)
+        let glassCornerRadius = DaymarkRadius.tile(for: size)
 
         return PhotosPicker(selection: $selectedItem, matching: .images) {
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
                     .fill(.ultraThinMaterial)
 
-                GlassRim(cornerRadius: glassCornerRadius)
+                DaymarkGlassRim(cornerRadius: glassCornerRadius)
 
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .top, spacing: 8 * overlayScale) {
@@ -401,7 +414,7 @@ struct CalendarView: View {
             .clipShape(RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DaymarkPressableButtonStyle())
     }
 
     private func photoTile(for entry: PhotoEntry, size: CGFloat) -> some View {
@@ -443,7 +456,7 @@ struct CalendarView: View {
     }
 
     private func pastDaysGrid(metrics: LayoutMetrics) -> some View {
-        LazyVStack(alignment: .leading, spacing: 16) {
+        LazyVStack(alignment: .leading, spacing: DaymarkSpacing.s, pinnedViews: [.sectionHeaders]) {
             ForEach(pastMonths, id: \.self) { month in
                 Section {
                     LazyVGrid(columns: columns(for: metrics), spacing: metrics.gridSpacing) {
@@ -452,16 +465,14 @@ struct CalendarView: View {
                                 NavigationLink(value: entry) {
                                     photoTile(for: entry, size: metrics.cellSize)
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(DaymarkPressableButtonStyle())
                             } else {
                                 emptyDayTile(date: date, size: metrics.cellSize)
                             }
                         }
                     }
                 } header: {
-                    Text(month.formatted(.dateTime.month(.wide).year()))
-                        .font(DaymarkTypography.sectionTitle)
-                        .padding(.top, 8)
+                    DaymarkSectionHeader(title: month.formatted(.dateTime.month(.wide).year()))
                 }
             }
 
@@ -475,6 +486,7 @@ struct CalendarView: View {
 
     private func emptyDayTile(date: Date, size: CGFloat) -> some View {
         let overlayScale = min(size / 120, 1)
+        let glassCornerRadius = DaymarkRadius.tile(for: size)
 
         return PhotosPicker(selection: Binding(
             get: { pastDaysPhotoItem },
@@ -487,7 +499,7 @@ struct CalendarView: View {
                 RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous)
                     .fill(.ultraThinMaterial)
 
-                GlassRim(cornerRadius: glassCornerRadius)
+                DaymarkGlassRim(cornerRadius: glassCornerRadius)
 
                 VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: overlayScale) {
@@ -520,7 +532,7 @@ struct CalendarView: View {
             .clipShape(RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DaymarkPressableButtonStyle())
     }
 
     private func daysInMonth(_ month: Date) -> [Date] {
@@ -608,9 +620,9 @@ struct CalendarView: View {
     }
 
     private func layoutMetrics(for width: CGFloat, safeAreaInsets: EdgeInsets) -> LayoutMetrics {
-        let horizontalPadding = 8.0
-        let gridSpacing = 6.0
-        let topPadding = 10.0
+        let horizontalPadding = DaymarkSpacing.s
+        let gridSpacing = gridColumnCount > 3 ? 4.0 : 8.0
+        let topPadding = DaymarkSpacing.xxs
         let bottomPadding = max(safeAreaInsets.bottom + 20, 28)
         let safeWidth = width.isFinite ? max(width, 0) : 0
         let totalGridSpacing = gridSpacing * Double(max(gridColumnCount - 1, 0))
@@ -758,60 +770,6 @@ private enum PhotoGridItem: Identifiable {
     }
 }
 
-/// Corner radius shared by the frosted-glass tiles.
-private let glassCornerRadius: CGFloat = 10
-
-/// The light catching a pane's top-leading edge and fading out, so a tile
-/// reads as a thick sheet of frosted glass.
-private struct GlassRim: View {
-    let cornerRadius: CGFloat
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .strokeBorder(
-                LinearGradient(
-                    colors: [.white.opacity(0.65), .white.opacity(0.08), .white.opacity(0.25)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                lineWidth: 0.8
-            )
-            .allowsHitTesting(false)
-    }
-}
-
-/// What the glass tiles blur: paper with soft strawberry and eggplant glows.
-/// It stays fixed while the grid scrolls, so each pane picks up a different tint.
-private struct GlassBackdrop: View {
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                DaymarkPalette.paper
-
-                RadialGradient(
-                    colors: [DaymarkSwatch.stellarStrawberry.opacity(0.4), .clear],
-                    center: .topTrailing,
-                    startRadius: 0,
-                    endRadius: geometry.size.height * 0.6
-                )
-                RadialGradient(
-                    colors: [DaymarkSwatch.picoEggplant.opacity(0.35), .clear],
-                    center: .bottomLeading,
-                    startRadius: 0,
-                    endRadius: geometry.size.height * 0.65
-                )
-                RadialGradient(
-                    colors: [DaymarkSwatch.grauzone.opacity(0.3), .clear],
-                    center: UnitPoint(x: 0.2, y: 0.35),
-                    startRadius: 0,
-                    endRadius: geometry.size.width * 0.7
-                )
-            }
-        }
-        .ignoresSafeArea()
-    }
-}
-
 private extension Calendar {
     func startOfMonth(for value: Date) -> Date {
         self.date(from: dateComponents([.year, .month], from: value)) ?? value
@@ -829,6 +787,10 @@ struct MarkCard: View {
 
     private var overlayScale: CGFloat {
         min(size / 120, 1)
+    }
+
+    private var glassCornerRadius: CGFloat {
+        DaymarkRadius.tile(for: size)
     }
 
     private var accessibilityDescription: String {
@@ -901,9 +863,9 @@ struct MarkCard: View {
             }
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous))
-            .overlay { GlassRim(cornerRadius: glassCornerRadius) }
+            .overlay { DaymarkGlassRim(cornerRadius: glassCornerRadius) }
             .contentShape(RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous))
-            .shadow(color: DaymarkSwatch.heiSeBlack.opacity(0.14), radius: 5, x: 0, y: 2)
+            .shadow(color: DaymarkSwatch.heiSeBlack.opacity(0.16), radius: 8, x: 0, y: 4)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accessibilityDescription)
         }

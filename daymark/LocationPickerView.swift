@@ -68,10 +68,12 @@ struct LocationPickerView: View {
                     Text(displayName)
                         .font(.subheadline)
                         .fontWeight(.medium)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .padding(.bottom, 16)
+                        .padding(.horizontal, DaymarkSpacing.m)
+                        .padding(.vertical, DaymarkSpacing.s)
+                        .daymarkFloatingGlass(in: Capsule(), interactive: false)
+                        .padding(.bottom, DaymarkSpacing.m)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .id(displayName)
                 }
             }
             .onAppear {

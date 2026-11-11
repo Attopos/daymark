@@ -23,35 +23,34 @@ struct PhotoDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: DaymarkSpacing.m) {
                 photoSection
                 metadataSection
                 deleteSection
+                    .padding(.top, DaymarkSpacing.xs)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 32)
+            .padding(.horizontal, DaymarkSpacing.m)
+            .padding(.top, DaymarkSpacing.xs)
+            .padding(.bottom, DaymarkSpacing.xxl)
         }
-        .daymarkScreen()
+        .daymarkScreen(backdrop: true)
         .daymarkNavigationTitle(entry.day.formatted(.dateTime.month(.wide).day().year()), inline: true)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 16) {
-                    if photoStore.originalData(for: entry) != nil {
-                        Button {
-                            showingPhotoEditor = true
-                        } label: {
-                            Image(systemName: "slider.horizontal.3")
-                                .font(.system(size: 15, weight: .semibold))
-                        }
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if photoStore.originalData(for: entry) != nil {
+                    Button {
+                        showingPhotoEditor = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
                     }
-
-                    PhotosPicker(selection: $selectedItem, matching: .images) {
-                        Image(systemName: "arrow.triangle.2.circlepath.camera")
-                            .font(.system(size: 15, weight: .semibold))
-                    }
+                    .accessibilityLabel("Edit Photo")
                 }
+
+                PhotosPicker(selection: $selectedItem, matching: .images) {
+                    Image(systemName: "arrow.triangle.2.circlepath.camera")
+                }
+                .accessibilityLabel("Replace Photo")
             }
         }
         .onChange(of: selectedItem) { _, newItem in
@@ -142,9 +141,12 @@ struct PhotoDetailView: View {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: DaymarkRadius.card, style: .continuous))
+                        .overlay { DaymarkGlassRim(cornerRadius: DaymarkRadius.card) }
+                        .shadow(color: DaymarkSwatch.heiSeBlack.opacity(0.18), radius: 18, x: 0, y: 10)
+                        .transition(.opacity)
                 } else {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: DaymarkRadius.card, style: .continuous)
                         .fill(DaymarkPalette.recessed)
                         .aspectRatio(1, contentMode: .fit)
                         .overlay {
@@ -244,32 +246,27 @@ struct PhotoDetailView: View {
             Button {
                 showingLocationPicker = true
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "map")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("Choose on the map")
-                        .font(.subheadline)
-                }
+                Label("Choose on the map", systemImage: "map")
             }
+            .buttonStyle(DaymarkSecondaryButtonStyle())
         }
-        .padding(16)
+        .padding(DaymarkSpacing.m)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .daymarkSurface(cornerRadius: 12)
+        .daymarkSurface()
     }
 
     private var deleteSection: some View {
         Button(role: .destructive) {
             showingDeleteConfirmation = true
         } label: {
-            HStack {
-                Image(systemName: "trash")
-                Text("Delete")
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
+            Label("Delete", systemImage: "trash")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, DaymarkSpacing.xs)
         }
-        .buttonStyle(.bordered)
-        .tint(.red)
+        .buttonStyle(.glass)
+        .controlSize(.large)
+        .foregroundStyle(.red)
     }
 
     private func metadataRow(flag: String?, title: String, value: String) -> some View {
@@ -279,19 +276,20 @@ struct PhotoDetailView: View {
                     Text(flag)
                         .font(.system(size: 20))
                 } else {
-                    Image(systemName: "location")
+                    Image(systemName: "location.fill")
                         .font(.system(size: 14, weight: .semibold))
                 }
             }
-            .foregroundStyle(DaymarkPalette.secondaryInk)
-            .frame(width: 24)
+            .foregroundStyle(DaymarkPalette.accent)
+            .frame(width: 36, height: 36)
+            .background(DaymarkPalette.accent.opacity(0.1), in: Circle())
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(DaymarkTypography.metadata)
                     .foregroundStyle(DaymarkPalette.secondaryInk)
                 Text(value)
-                    .font(.subheadline)
+                    .font(DaymarkTypography.entryTitle)
             }
         }
     }

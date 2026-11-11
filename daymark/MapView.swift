@@ -72,14 +72,15 @@ struct MapView: View {
                 } label: {
                     Image(systemName: showsSatellite ? "map" : "globe.americas")
                         .font(.system(size: 17, weight: .medium))
-                        .frame(width: 44, height: 44)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+                        .contentTransition(.symbolEffect(.replace))
+                        .frame(width: 48, height: 48)
+                        .daymarkFloatingGlass(in: Circle())
                 }
                 .buttonStyle(.plain)
+                .animation(DaymarkMotion.snappy, value: showsSatellite)
                 .accessibilityIdentifier("mapStyleToggle")
                 .accessibilityLabel(showsSatellite ? "Show Standard Map" : "Show Satellite Map")
-                .padding(16)
+                .padding(DaymarkSpacing.m)
             }
             .onAppear {
                 locationManager.requestAuthorizationIfNeeded()

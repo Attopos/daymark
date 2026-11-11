@@ -88,9 +88,10 @@ private struct ProfileView: View {
                         Text("Sign Out")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
+                            .frame(minHeight: 36)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
+                    .controlSize(.large)
                     .disabled(isDeleting)
 
                     Button(role: .destructive) {
@@ -104,9 +105,10 @@ private struct ProfileView: View {
                                 .font(.headline)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
+                        .frame(minHeight: 36)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
+                    .controlSize(.large)
                     .tint(.red)
                     .disabled(isDeleting)
 

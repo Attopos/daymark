@@ -31,17 +31,16 @@ struct DeskCalendarView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, DaymarkSpacing.m)
             .padding(.top, 28)
-            .padding(.bottom, 12)
-            .background(DaymarkPalette.paper)
+            .padding(.bottom, DaymarkSpacing.s)
             .daymarkNavigationTitle("Daily", inline: true)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if let current = resolvedIndex(), current < entries.count - 1 {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
-                            withAnimation(.easeInOut(duration: 0.25)) {
+                            withAnimation(DaymarkMotion.spring) {
                                 index = Int.max
                                 anchorID = nil
                                 flip = 0
@@ -70,7 +69,7 @@ struct DeskCalendarView: View {
             .task(id: anchorID) {
                 prefetchNeighbours()
             }
-            .daymarkScreen()
+            .daymarkScreen(backdrop: true)
         }
     }
 
@@ -126,9 +125,14 @@ struct DeskCalendarView: View {
             }
 
             Text("\(current + 1) of \(entries.count)")
-                .font(DaymarkTypography.metadata)
+                .font(DaymarkTypography.metadata.weight(.medium))
                 .monospacedDigit()
+                .contentTransition(.numericText())
+                .animation(DaymarkMotion.snappy, value: current)
                 .foregroundStyle(DaymarkPalette.secondaryInk)
+                .padding(.horizontal, DaymarkSpacing.s)
+                .padding(.vertical, 6)
+                .daymarkFloatingGlass(in: Capsule(), interactive: false)
         }
     }
 
@@ -321,8 +325,8 @@ private struct CalendarPage: View {
 
             CalendarPagePhoto(entry: entry)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(DaymarkPalette.recessed, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(DaymarkPalette.recessed, in: RoundedRectangle(cornerRadius: DaymarkRadius.small, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: DaymarkRadius.small, style: .continuous))
 
             footer
                 .padding(.top, 12)

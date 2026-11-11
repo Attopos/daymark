@@ -81,6 +81,46 @@ enum DaymarkTypography {
     static let timelineYear = Font.caption2
 }
 
+
+/// Corner radii, from the smallest grid tile up to full-width panels. Every
+/// rounded shape in the app uses one of these with the continuous corner style.
+enum DaymarkRadius {
+    /// Badges and small inline thumbnails.
+    static let small: CGFloat = 10
+    /// Photo tiles in the calendar and search grids (scaled down for dense grids).
+    static let tile: CGFloat = 14
+    /// Cards, list panels and the photo on the detail page.
+    static let card: CGFloat = 24
+    /// Sheets and other full-width surfaces.
+    static let panel: CGFloat = 32
+
+    /// A tile radius that stays in proportion when the grid is pinched to more columns.
+    static func tile(for size: CGFloat) -> CGFloat {
+        min(tile, max(6, size * 0.11))
+    }
+}
+
+/// A 4-point spacing scale for padding and stack spacing.
+enum DaymarkSpacing {
+    static let xxs: CGFloat = 4
+    static let xs: CGFloat = 8
+    static let s: CGFloat = 12
+    static let m: CGFloat = 16
+    static let l: CGFloat = 20
+    static let xl: CGFloat = 24
+    static let xxl: CGFloat = 32
+}
+
+/// Shared motion curves so every transition and press settles the same way.
+enum DaymarkMotion {
+    /// Taps and toggles.
+    static let snappy = Animation.snappy(duration: 0.24)
+    /// Layout changes such as switching grids or showing a panel.
+    static let spring = Animation.spring(response: 0.42, dampingFraction: 0.84)
+    /// Presses on buttons and cards.
+    static let press = Animation.spring(response: 0.26, dampingFraction: 0.68)
+}
+
 extension View {
     func daymarkNavigationTitle(_ title: String, inline: Bool = false) -> some View {
         self
@@ -105,22 +145,139 @@ extension View {
             }
     }
 
-    func daymarkScreen() -> some View {
+    /// Paper, ink and accent for a whole screen. With `backdrop`, the screen
+    /// sits on the palette's soft glow so frosted surfaces above it pick up colour.
+    /// The navigation bar stays transparent so iOS draws its own scroll-edge glass.
+    func daymarkScreen(backdrop: Bool = false) -> some View {
         self
             .foregroundStyle(DaymarkPalette.ink)
             .tint(DaymarkPalette.accent)
-            .background(DaymarkPalette.paper)
-            .toolbarBackground(DaymarkPalette.paper, for: .navigationBar)
+            .background {
+                if backdrop {
+                    DaymarkBackdrop()
+                } else {
+                    DaymarkPalette.paper.ignoresSafeArea()
+                }
+            }
     }
 
-    func daymarkSurface(cornerRadius: CGFloat = 16) -> some View {
-        self
-            .background(DaymarkPalette.surface, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(DaymarkPalette.rule, lineWidth: 0.75)
+    /// A frosted card: material tinted with the palette surface, a light rim
+    /// along the top edge and a soft, low shadow.
+    func daymarkSurface(cornerRadius: CGFloat = DaymarkRadius.card) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return self
+            .background {
+                shape.fill(.regularMaterial)
+                shape.fill(DaymarkPalette.surface.opacity(0.5))
             }
-            .shadow(color: DaymarkPalette.shadow, radius: 3, x: 0, y: 2)
+            .overlay { DaymarkGlassRim(cornerRadius: cornerRadius) }
+            .shadow(color: DaymarkSwatch.heiSeBlack.opacity(0.08), radius: 14, x: 0, y: 6)
+    }
+
+    /// Liquid Glass for controls that float over content, such as map buttons
+    /// and counters. Content itself uses `daymarkSurface` instead.
+    func daymarkFloatingGlass<S: Shape>(in shape: S, interactive: Bool = true) -> some View {
+        glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
+    }
+}
+
+/// The light catching a pane's top-leading edge and fading out, so a surface
+/// reads as a thick sheet of frosted glass.
+struct DaymarkGlassRim: View {
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .strokeBorder(
+                LinearGradient(
+                    colors: [.white.opacity(0.6), .white.opacity(0.06), .white.opacity(0.22)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                lineWidth: 0.8
+            )
+            .allowsHitTesting(false)
+    }
+}
+
+/// Paper with soft strawberry, eggplant and Grauzone glows. It stays fixed
+/// while content scrolls, so each frosted pane above it picks up a different tint.
+struct DaymarkBackdrop: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        GeometryReader { geometry in
+            let strength = colorScheme == .dark ? 0.75 : 1.0
+            ZStack {
+                DaymarkPalette.paper
+
+                RadialGradient(
+                    colors: [DaymarkSwatch.stellarStrawberry.opacity(0.4 * strength), .clear],
+                    center: .topTrailing,
+                    startRadius: 0,
+                    endRadius: geometry.size.height * 0.6
+                )
+                RadialGradient(
+                    colors: [DaymarkSwatch.picoEggplant.opacity(0.35 * strength), .clear],
+                    center: .bottomLeading,
+                    startRadius: 0,
+                    endRadius: geometry.size.height * 0.65
+                )
+                RadialGradient(
+                    colors: [DaymarkSwatch.grauzone.opacity(0.3 * strength), .clear],
+                    center: UnitPoint(x: 0.2, y: 0.35),
+                    startRadius: 0,
+                    endRadius: geometry.size.width * 0.7
+                )
+            }
+        }
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
+    }
+}
+
+/// A rounded-square symbol tile in the accent colour, used to lead settings rows.
+struct DaymarkIconBadge: View {
+    let systemName: String
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(DaymarkPalette.buttonText)
+            .frame(width: 36, height: 36)
+            .background(
+                DaymarkPalette.buttonFill.gradient,
+                in: RoundedRectangle(cornerRadius: DaymarkRadius.small, style: .continuous)
+            )
+            .accessibilityHidden(true)
+    }
+}
+
+/// Section heading that floats as a small glass capsule when pinned over a grid.
+struct DaymarkSectionHeader: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(DaymarkTypography.sectionTitle)
+            .foregroundStyle(DaymarkPalette.ink)
+            .padding(.horizontal, DaymarkSpacing.s)
+            .padding(.vertical, 6)
+            .daymarkFloatingGlass(in: Capsule(), interactive: false)
+            .padding(.vertical, DaymarkSpacing.xs)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Gives cards, tiles and links a small spring when pressed.
+struct DaymarkPressableButtonStyle: ButtonStyle {
+    var pressedScale: CGFloat = 0.96
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? pressedScale : 1)
+            .opacity(configuration.isPressed ? 0.9 : 1)
+            .animation(DaymarkMotion.press, value: configuration.isPressed)
     }
 }
 
@@ -130,14 +287,16 @@ struct DaymarkPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline)
-            .fontWeight(.medium)
+            .fontWeight(.semibold)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
             .foregroundStyle(DaymarkPalette.buttonText)
-            .background(DaymarkPalette.buttonFill, in: Capsule())
-            .opacity(isEnabled ? (configuration.isPressed ? 0.75 : 1) : 0.45)
+            .background(DaymarkPalette.buttonFill.gradient, in: Capsule())
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.45)
+            .animation(DaymarkMotion.press, value: configuration.isPressed)
     }
 }
 
@@ -147,14 +306,15 @@ struct DaymarkSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline)
-            .fontWeight(.medium)
+            .fontWeight(.semibold)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
             .foregroundStyle(DaymarkPalette.accent)
-            .background(DaymarkPalette.accent.opacity(configuration.isPressed ? 0.18 : 0.09), in: Capsule())
-            .overlay(Capsule().strokeBorder(DaymarkPalette.accent.opacity(0.22), lineWidth: 0.75))
+            .background(DaymarkPalette.accent.opacity(configuration.isPressed ? 0.18 : 0.1), in: Capsule())
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
             .opacity(isEnabled ? 1 : 0.45)
+            .animation(DaymarkMotion.press, value: configuration.isPressed)
     }
 }

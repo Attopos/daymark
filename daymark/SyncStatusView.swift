@@ -84,6 +84,7 @@ struct ICloudSyncDetailView: View {
                         Image(systemName: state.icon)
                             .font(.system(size: 38, weight: .medium))
                             .foregroundStyle(state.tint)
+                            .contentTransition(.symbolEffect(.replace))
                     }
                 }
                 .frame(height: 44)
@@ -260,13 +261,13 @@ struct ICloudSyncDetailView: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .clipShape(RoundedRectangle(cornerRadius: DaymarkRadius.tile, style: .continuous))
             } else {
                 ContentUnavailableView("Preview unavailable", systemImage: "photo")
                     .frame(minHeight: 180)
             }
             Button(actionTitle, action: action)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
