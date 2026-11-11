@@ -423,6 +423,7 @@ struct ClusterAnnotation: View {
             }
         }
         .frame(width: 40, height: 40)
+        .daymarkEInk()
         .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 3, style: .continuous)
@@ -456,6 +457,7 @@ struct PhotoMapAnnotation: View {
                 }
             }
             .frame(width: 32, height: 32)
+            .daymarkEInk()
             .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 3, style: .continuous)

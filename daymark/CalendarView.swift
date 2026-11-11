@@ -836,6 +836,7 @@ struct MarkCard: View {
                 }
                 .frame(width: size, height: size)
                 .clipped()
+                .daymarkEInk()
 
                 VStack(spacing: 0) {
                     HStack(alignment: .top, spacing: 8 * overlayScale) {
@@ -868,11 +869,15 @@ struct MarkCard: View {
 
                         Spacer(minLength: 0)
 
-                        if let flagEmoji {
-                            Text(flagEmoji)
-                                .font(.system(size: 13 * overlayScale))
-                                .frame(width: 24 * overlayScale, height: 24 * overlayScale)
-                                .background(DaymarkPalette.paper, in: Circle())
+                        // A greyscale flag says nothing, so the tile carries the country code.
+                        if flagEmoji != nil, let code = LocationGeocoder.normalizedCountryCode(entry.countryCode) {
+                            Text(code)
+                                .font(.system(size: metadataFontSize * overlayScale, weight: .semibold))
+                                .tracking(0.6)
+                                .foregroundStyle(DaymarkPalette.ink)
+                                .padding(.horizontal, 4 * overlayScale)
+                                .padding(.vertical, 2 * overlayScale)
+                                .background(DaymarkPalette.paper)
                                 .fixedSize()
                         }
                     }

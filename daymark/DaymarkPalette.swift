@@ -158,6 +158,14 @@ extension View {
             }
     }
 
+    /// Renders a thumbnail the way an e-ink panel would: greyscale with a
+    /// little extra contrast. Full-size photographs keep their colour.
+    func daymarkEInk() -> some View {
+        self
+            .saturation(0)
+            .contrast(1.12)
+    }
+
     /// A control floating over a map: opaque paper with a one-point ink
     /// outline, like a button on an e-ink reader. No glass or shadow.
     func daymarkFloatingGlass<S: InsettableShape>(in shape: S) -> some View {
