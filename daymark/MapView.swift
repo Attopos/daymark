@@ -74,9 +74,12 @@ struct MapView: View {
                         .font(.system(size: 17, weight: .medium))
                         .contentTransition(.symbolEffect(.replace))
                         .frame(width: 48, height: 48)
-                        .daymarkFloatingGlass(in: Circle())
+                        // Not interactive glass: over the Map it swallowed the
+                        // button's tap. The button style supplies the press spring.
+                        .daymarkFloatingGlass(in: Circle(), interactive: false)
+                        .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(DaymarkPressableButtonStyle(pressedScale: 0.92))
                 .animation(DaymarkMotion.snappy, value: showsSatellite)
                 .accessibilityIdentifier("mapStyleToggle")
                 .accessibilityLabel(showsSatellite ? "Show Standard Map" : "Show Satellite Map")
