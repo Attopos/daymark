@@ -837,53 +837,49 @@ struct MarkCard: View {
                 .frame(width: size, height: size)
                 .clipped()
 
-                LinearGradient(
-                    colors: [.black.opacity(0.42), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-                .frame(width: size, height: size)
-
                 VStack(spacing: 0) {
                     HStack(alignment: .top, spacing: 8 * overlayScale) {
                         VStack(alignment: .leading, spacing: overlayScale) {
+                            // An opaque paper label, like a caption printed on an e-ink page.
                             HStack(spacing: 4 * overlayScale) {
                                 if Calendar.current.isDateInToday(entry.day) {
-                                    DaymarkBeaconMark(size: 8 * overlayScale, color: .white)
+                                    DaymarkBeaconMark(size: 7 * overlayScale)
                                 }
                                 Text(dayText)
-                                    .font(.system(size: dayFontSize * overlayScale, weight: .semibold, design: .serif))
-                                    .foregroundStyle(.white)
+                                    .font(.system(size: dayFontSize * 0.85 * overlayScale, weight: .semibold, design: .serif))
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.5)
                                     .allowsTightening(true)
-                            }
 
-                            if let subtitleText {
-                                Text(subtitleText)
-                                    .font(.system(size: metadataFontSize * overlayScale, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.88))
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.5)
-                                    .allowsTightening(true)
+                                if let subtitleText {
+                                    Text(subtitleText)
+                                        .font(.system(size: metadataFontSize * overlayScale, weight: .medium))
+                                        .foregroundStyle(DaymarkPalette.secondaryInk)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.5)
+                                        .allowsTightening(true)
+                                }
                             }
+                            .foregroundStyle(DaymarkPalette.ink)
+                            .padding(.horizontal, 5 * overlayScale)
+                            .padding(.vertical, 2 * overlayScale)
+                            .background(DaymarkPalette.paper)
                         }
 
                         Spacer(minLength: 0)
 
                         if let flagEmoji {
                             Text(flagEmoji)
-                                .font(.system(size: 14 * overlayScale))
-                                .frame(width: 28 * overlayScale, height: 28 * overlayScale)
-                                .background(.ultraThinMaterial, in: Circle())
-                                .overlay(Circle().strokeBorder(.white.opacity(0.5), lineWidth: 0.5))
+                                .font(.system(size: 13 * overlayScale))
+                                .frame(width: 24 * overlayScale, height: 24 * overlayScale)
+                                .background(DaymarkPalette.paper, in: Circle())
                                 .fixedSize()
                         }
                     }
 
                     Spacer(minLength: 0)
                 }
-                .padding(8 * overlayScale)
+                .padding(5 * overlayScale)
             }
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous))

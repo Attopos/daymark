@@ -258,7 +258,7 @@ struct PhotoDetailView: View {
                 diameter: 96
             )
         }
-        .padding(DaymarkSpacing.m)
+        .padding(.vertical, DaymarkSpacing.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .daymarkSurface()
     }
@@ -294,7 +294,7 @@ struct PhotoDetailView: View {
                     .font(DaymarkTypography.metadata)
                     .foregroundStyle(DaymarkPalette.secondaryInk)
                 Text(value)
-                    .font(DaymarkTypography.entryTitle)
+                    .font(DaymarkTypography.reading)
             }
         }
     }

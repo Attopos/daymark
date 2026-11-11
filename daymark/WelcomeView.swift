@@ -33,10 +33,12 @@ struct WelcomeView: View {
 
                 Text("Welcome to Daymark")
                     .font(DaymarkTypography.pageTitle)
+                    .tracking(-0.6)
                     .multilineTextAlignment(.center)
 
                 Text("Capture one photo a day and build a journal of your year.")
-                    .font(.subheadline)
+                    .font(DaymarkTypography.reading)
+                    .lineSpacing(5)
                     .foregroundStyle(DaymarkPalette.secondaryInk)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)

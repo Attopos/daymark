@@ -283,7 +283,6 @@ private struct CalendarLeaf: View, Animatable {
                 .fill(DaymarkSwatch.heiSeBlack.opacity(foldShade + underShade))
                 .allowsHitTesting(false)
         }
-        .shadow(color: DaymarkSwatch.heiSeBlack.opacity(angle > 0 ? 0.18 : 0.08), radius: angle > 0 ? 10 : 3, y: 2)
         .rotation3DEffect(.degrees(angle), axis: (x: 1, y: 0, z: 0), anchor: .top, perspective: 0.35)
         // Fade the leaf as it settles behind the binding instead of covering the bar.
         .opacity(angle <= 120 ? 1 : max(0, (180 - angle) / 60))
@@ -339,7 +338,7 @@ private struct CalendarPage: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DaymarkPalette.surface, in: Self.shape)
         .overlay {
-            Self.shape.strokeBorder(DaymarkPalette.rule, lineWidth: 0.75)
+            Self.shape.strokeBorder(DaymarkPalette.ink, lineWidth: 1)
         }
         .overlay(alignment: .top) {
             CalendarBinding.holes
@@ -388,7 +387,7 @@ private struct CalendarPage: View {
                 }
                 if let caption = entry.caption, !caption.isEmpty {
                     Text(caption)
-                        .font(DaymarkTypography.metadata)
+                        .font(DaymarkTypography.readingSmall)
                         .foregroundStyle(DaymarkPalette.secondaryInk)
                 } else if let countryName = entry.countryName {
                     Text(countryName)
@@ -469,21 +468,13 @@ private struct CalendarBinding: View {
         HStack(spacing: 0) {
             ForEach(0..<Self.ringCount(for: width), id: \.self) { _ in
                 Capsule()
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [DaymarkPalette.metal, DaymarkPalette.metalHighlight, DaymarkPalette.metal],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        lineWidth: 2.5
-                    )
+                    .strokeBorder(DaymarkPalette.metal, lineWidth: 2)
                     .frame(width: 8, height: Self.overhang + 14)
                     .frame(maxWidth: .infinity)
             }
         }
         .padding(.horizontal, 20)
         .frame(width: width)
-        .shadow(color: DaymarkSwatch.heiSeBlack.opacity(0.25), radius: 1, y: 1)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
@@ -496,12 +487,6 @@ private struct DeskCalendarStand: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            Ellipse()
-                .fill(DaymarkSwatch.heiSeBlack.opacity(0.18))
-                .frame(width: pageSize.width * 1.05, height: 18)
-                .blur(radius: 8)
-                .offset(y: 10)
-
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(DaymarkPalette.stand)
                 .frame(width: pageSize.width + 12, height: pageSize.height + depth)

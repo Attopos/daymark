@@ -1,46 +1,43 @@
 import SwiftUI
 import UIKit
 
-/// Daymark's look is quiet and editorial: paper, ink and serif dates, so the
-/// photographs are the only colour on screen. One accent, the *mark*, appears
-/// only where a day is marked or is today.
+/// Daymark looks like an e-ink page set the way Medium sets type: black, white
+/// and grey only, crisp one-point lines, no shadows, gradients or translucency.
+/// The photographs are the only colour on screen.
 enum DaymarkSwatch {
-    /// Used for shadows and shading on the desk calendar, the one tactile object.
+    /// Shading for a desk-calendar leaf while it turns.
     static let heiSeBlack = hex(0x000000)
-    /// The mark colour in light mode.
-    static let picoEggplant = hex(0x732553)
 
     static func hex(_ rgb: UInt32) -> Color {
         Color(uiColor: DaymarkPalette.uiColor(rgb))
     }
 }
 
-/// Semantic colours. Light mode is ink on warm white paper; dark mode is the
-/// reverse. Controls are ink-coloured; `mark` is the only hue. Semantic status
-/// colours (errors, sync state) stay separate.
+/// Semantic colours. Light mode is black ink on the pale grey of an e-ink
+/// panel; dark mode is the inverted panel. There is no hue: `mark` is ink.
+/// Semantic status colours (errors, sync state) stay separate.
 enum DaymarkPalette {
     /// Tint for controls: ink in both themes (the asset mirrors `ink`).
     static let accent = Color("AccentColor")
-    /// The single accent: today, the selected day and the stroke on marked days.
-    static let mark = adaptive(light: 0x732553, dark: 0xD68FB8)
+    /// Today, the selected day, the stroke on marked days and the postmark: solid ink.
+    static let mark = ink
     static let highlight = mark
     static let paper = Color(uiColor: paperUIColor)
-    static let surface = adaptive(light: 0xFFFFFF, dark: 0x1C1C1B)
-    static let recessed = adaptive(light: 0xEFECE6, dark: 0x262625)
+    static let surface = paper
+    static let recessed = adaptive(light: 0xDFDEDA, dark: 0x242424)
     static let ink = Color(uiColor: inkUIColor)
-    static let secondaryInk = adaptive(light: 0x6F6B65, dark: 0x9E9991)
-    static let rule = adaptive(light: 0xE1DDD5, dark: 0x30302E)
-    static let shadow = DaymarkSwatch.heiSeBlack.opacity(0.06)
+    static let secondaryInk = adaptive(light: 0x6B6B6B, dark: 0x9A9A9A)
+    /// Dividers between rows, in the light grey of Medium's list rules.
+    static let rule = adaptive(light: 0xCFCEC9, dark: 0x3A3A3A)
     // A white photo mount remains visible over both maps and photographs in either theme.
     static let photoMount = DaymarkSwatch.hex(0xFFFFFF)
     /// The back board of the desk calendar.
-    static let stand = adaptive(light: 0x2B2A28, dark: 0x3B3A37)
-    /// Brushed metal for the desk calendar's rings.
-    static let metal = adaptive(light: 0x9A9A98, dark: 0x8A8A88)
-    static let metalHighlight = adaptive(light: 0xF2F2F0, dark: 0xD8D8D6)
+    static let stand = adaptive(light: 0x1A1A1A, dark: 0x4A4A4A)
+    /// The desk calendar's rings: flat grey wire.
+    static let metal = adaptive(light: 0x6B6B6B, dark: 0x9A9A9A)
 
-    static let paperUIColor = adaptiveUIColor(light: 0xFAF8F4, dark: 0x111110)
-    static let inkUIColor = adaptiveUIColor(light: 0x161514, dark: 0xF2EFE9)
+    static let paperUIColor = adaptiveUIColor(light: 0xF1F0EC, dark: 0x0C0C0C)
+    static let inkUIColor = adaptiveUIColor(light: 0x121212, dark: 0xE4E3DF)
     static let buttonFill = ink
     static let buttonText = paper
 
@@ -64,13 +61,18 @@ enum DaymarkPalette {
     }
 }
 
-/// Serif type marks dates and chapter headings; controls and body copy use system type.
+/// Type set the way Medium sets it: tight bold sans-serif headings, a serif
+/// reading face (Charter) for anything you read rather than tap, and small
+/// grey sans-serif metadata. Dates keep a serif display face.
 enum DaymarkTypography {
-    static let pageTitle = Font.system(.largeTitle, design: .serif, weight: .regular)
-    static let sectionTitle = Font.system(.title3, design: .serif, weight: .regular)
-    static let entryTitle = Font.system(.headline, design: .serif, weight: .medium)
-    static let body = Font.body
-    static let metadata = Font.caption
+    static let pageTitle = Font.system(.largeTitle, design: .default, weight: .bold)
+    static let sectionTitle = Font.system(.title3, design: .default, weight: .bold)
+    static let entryTitle = Font.system(.headline, design: .default, weight: .semibold)
+    /// The reading face for captions, places and explanatory copy.
+    static let reading = Font.custom("Charter", size: 18, relativeTo: .body)
+    static let readingSmall = Font.custom("Charter", size: 15, relativeTo: .subheadline)
+    static let body = reading
+    static let metadata = Font.footnote
     static let timelineDay = Font.system(.title2, design: .serif, weight: .medium)
     static let timelineMonth = Font.caption.weight(.medium)
     static let timelineYear = Font.caption2
@@ -82,8 +84,8 @@ enum DaymarkRadius {
     static let tile: CGFloat = 4
     /// Badges, inline thumbnails and the photo on a calendar page.
     static let small: CGFloat = 6
-    /// Cards and the photo on the detail page.
-    static let card: CGFloat = 14
+    /// Outlined panels.
+    static let card: CGFloat = 8
     /// Sheets and other full-width surfaces.
     static let panel: CGFloat = 24
 
@@ -122,7 +124,7 @@ extension View {
                 if inline {
                     ToolbarItem(placement: .title) {
                         Text(title)
-                            .font(.system(.headline, design: .serif, weight: .medium))
+                            .font(.system(.headline, design: .default, weight: .bold))
                             .foregroundStyle(DaymarkPalette.ink)
                             .accessibilityAddTraits(.isHeader)
                     }
@@ -130,6 +132,7 @@ extension View {
                     ToolbarItem(placement: .largeTitle) {
                         Text(title)
                             .font(DaymarkTypography.pageTitle)
+                            .tracking(-0.6)
                             .foregroundStyle(DaymarkPalette.ink)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .accessibilityAddTraits(.isHeader)
@@ -147,19 +150,20 @@ extension View {
             .background { DaymarkPalette.paper.ignoresSafeArea() }
     }
 
-    /// A flat card: surface fill and a hairline rule, no shadow.
+    /// A list row in the Medium manner: no box, just a rule underneath.
     func daymarkSurface(cornerRadius: CGFloat = DaymarkRadius.card) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        return self
-            .background(DaymarkPalette.surface, in: shape)
-            .overlay { shape.strokeBorder(DaymarkPalette.rule, lineWidth: 0.75) }
+        self
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(DaymarkPalette.rule).frame(height: 1)
+            }
     }
 
-    /// Glass for the few controls that float over a map. Everything else is
-    /// paper; the system supplies the glass for tab and navigation bars.
-    func daymarkFloatingGlass<S: Shape>(in shape: S) -> some View {
-        // Never interactive glass: inside a button label it swallows the tap.
-        glassEffect(.regular, in: shape)
+    /// A control floating over a map: opaque paper with a one-point ink
+    /// outline, like a button on an e-ink reader. No glass or shadow.
+    func daymarkFloatingGlass<S: InsettableShape>(in shape: S) -> some View {
+        self
+            .background(DaymarkPalette.paper, in: shape)
+            .overlay { shape.strokeBorder(DaymarkPalette.ink, lineWidth: 1) }
     }
 }
 
@@ -169,7 +173,7 @@ struct DaymarkHairline: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .strokeBorder(DaymarkPalette.ink.opacity(0.08), lineWidth: 0.5)
+            .strokeBorder(DaymarkPalette.ink.opacity(0.18), lineWidth: 0.5)
             .allowsHitTesting(false)
     }
 }
@@ -232,7 +236,7 @@ struct DaymarkBlockButtonStyle: ButtonStyle {
                 if prominent {
                     Capsule().fill(color)
                 } else {
-                    Capsule().strokeBorder(color.opacity(0.35), lineWidth: 1)
+                    Capsule().strokeBorder(color, lineWidth: 1)
                 }
             }
             .contentShape(Capsule())
@@ -273,7 +277,7 @@ struct DaymarkSecondaryButtonStyle: ButtonStyle {
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
             .foregroundStyle(DaymarkPalette.ink)
-            .background(Capsule().strokeBorder(DaymarkPalette.ink.opacity(0.35), lineWidth: 1))
+            .background(Capsule().strokeBorder(DaymarkPalette.ink, lineWidth: 1))
             .contentShape(Capsule())
             .scaleEffect(configuration.isPressed ? 0.95 : 1)
             .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.4)

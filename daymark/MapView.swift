@@ -438,7 +438,6 @@ struct ClusterAnnotation: View {
                 .overlay { Capsule().stroke(DaymarkPalette.photoMount, lineWidth: 1.5) }
                 .offset(x: 7, y: -7)
         }
-        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
     }
 }
 
@@ -462,7 +461,6 @@ struct PhotoMapAnnotation: View {
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
                     .stroke(DaymarkPalette.photoMount, lineWidth: 2)
             }
-            .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
 
             // The pin's foot is a daymark diamond in the mark colour.
             DaymarkBeaconMark(size: 9)

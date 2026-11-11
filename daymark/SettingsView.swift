@@ -39,12 +39,12 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: DaymarkSpacing.m) {
+                VStack(spacing: 0) {
                     appearanceCard
                     iCloudSyncCard
                     libraryCard
                 }
-                .padding(.horizontal, DaymarkSpacing.m)
+                .padding(.horizontal, DaymarkSpacing.l)
                 .padding(.top, DaymarkSpacing.xs)
                 .padding(.bottom, DaymarkSpacing.xxl)
                 .animation(DaymarkMotion.spring, value: isBusy)
@@ -148,9 +148,9 @@ struct SettingsView: View {
                 }
             }
             .padding(3)
-            .background(DaymarkPalette.recessed, in: Capsule())
+            .overlay(Capsule().strokeBorder(DaymarkPalette.ink, lineWidth: 1))
         }
-        .padding(18)
+        .padding(.vertical, 22)
         .frame(maxWidth: .infinity, alignment: .leading)
         .daymarkSurface()
     }
@@ -179,8 +179,9 @@ struct SettingsView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(DaymarkPalette.secondaryInk.opacity(0.65))
             }
-            .padding(18)
+            .padding(.vertical, 22)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
             .daymarkSurface()
         }
         .buttonStyle(DaymarkPressableButtonStyle(pressedScale: 0.98))
@@ -235,7 +236,7 @@ struct SettingsView: View {
                     .foregroundStyle(DaymarkPalette.secondaryInk)
             }
         }
-        .padding(18)
+        .padding(.vertical, 22)
         .frame(maxWidth: .infinity, alignment: .leading)
         .daymarkSurface()
     }
@@ -251,12 +252,11 @@ struct SettingsView: View {
                 .background {
                     if isSelected {
                         Capsule()
-                            .fill(DaymarkPalette.surface)
-                            .overlay(Capsule().strokeBorder(DaymarkPalette.rule, lineWidth: 0.75))
+                            .fill(DaymarkPalette.ink)
                             .matchedGeometryEffect(id: "themeSelection", in: themeSelection)
                     }
                 }
-                .foregroundStyle(isSelected ? DaymarkPalette.ink : DaymarkPalette.secondaryInk)
+                .foregroundStyle(isSelected ? DaymarkPalette.paper : DaymarkPalette.ink)
                 .contentShape(Capsule())
         }
         .buttonStyle(DaymarkPressableButtonStyle(pressedScale: 0.92))

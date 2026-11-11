@@ -41,7 +41,7 @@ struct SignInAvatarButton: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(DaymarkPalette.accent)
                     .frame(width: Self.size, height: Self.size)
-                    .glassEffect(.regular.interactive(), in: Circle())
+                    .overlay { Circle().strokeBorder(DaymarkPalette.ink, lineWidth: 1) }
             }
         }
         .clipShape(Circle())
