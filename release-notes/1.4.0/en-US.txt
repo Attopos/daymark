@@ -1,0 +1,8 @@
+A quieter, more editorial Daymark.
+
+• New look: paper and ink with serif dates and easy-to-read type, so your photos are the colour on the page.
+• Each marked day now gets a postmark with its place and date, stamped with a gentle haptic.
+• Months open with a large numeral and a count of the days you marked.
+• A new tab bar, greyscale maps and wider, evenly spaced photo grids.
+• Photos are stored more compactly, which saves space and makes iCloud sync smoother. Existing photos are converted once after the update.
+• Fixed crashes when deleting a photo and when exporting a backup.
