@@ -806,6 +806,31 @@ final class daymarkTests: XCTestCase {
         XCTAssertEqual(merged.snapshot.caption, "Remote Caption")
     }
 
+    func testMetadataSyncSkipsEntryDeletedWhileFetchingInventory() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let kept = PhotoEntry(day: Date(timeIntervalSince1970: 1_700_000_000), caption: "Kept")
+        let deleted = PhotoEntry(day: Date(timeIntervalSince1970: 1_700_100_000), caption: "Deleted")
+        context.insert(kept)
+        context.insert(deleted)
+        try context.save()
+        let keptID = kept.id
+        let remoteStore = RecordingMetadataRemoteStore()
+        remoteStore.onInventory = {
+            context.delete(deleted)
+            try? context.save()
+        }
+
+        let summary = try await MetadataSyncCoordinator(
+            remoteStore: remoteStore,
+            deviceID: "local-device"
+        ).sync(entries: [kept, deleted], in: context)
+
+        XCTAssertEqual(summary.uploadedCount, 1)
+        XCTAssertEqual(remoteStore.uploadedRecords.map(\.entryID), [keptID])
+        XCTAssertFalse(deleted.isLive)
+    }
+
     func testMetadataSyncAppliesRemoteFieldAndUploadsMergedRecord() async throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
@@ -1293,13 +1318,15 @@ private final class RecordingMetadataRemoteStore: MetadataRemoteStore {
     private(set) var uploadedRecords: [RemoteMetadataRecord] = []
     private(set) var deletedEntryIDs: [String] = []
     private let remoteInventory: [String: RemoteMetadataRecord]
+    var onInventory: (() -> Void)?
 
     init(inventory: [String: RemoteMetadataRecord] = [:]) {
         remoteInventory = inventory
     }
 
     func inventory() async throws -> [String: RemoteMetadataRecord] {
-        remoteInventory
+        onInventory?()
+        return remoteInventory
     }
 
     func upload(_ records: [RemoteMetadataRecord]) async throws {

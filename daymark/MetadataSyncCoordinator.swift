@@ -103,11 +103,11 @@ struct MetadataSyncCoordinator {
     ) async throws -> MetadataSyncSummary {
         var summary = MetadataSyncSummary()
         var localByID: [String: PhotoEntry] = [:]
-        for entry in entries where localByID[entry.id] == nil {
+        for entry in entries where entry.isLive && localByID[entry.id] == nil {
             localByID[entry.id] = entry
         }
-        let uniqueEntries = Array(localByID.values)
         var remoteByID = try await remoteStore.inventory()
+        let uniqueEntries = localByID.values.filter(\.isLive)
         var localByDay: [Date: PhotoEntry] = [:]
         for entry in uniqueEntries {
             let day = Calendar.current.startOfDay(for: entry.day)
@@ -184,14 +184,14 @@ struct MetadataSyncCoordinator {
 
         if !uploads.isEmpty {
             for record in uploads {
-                localByID[record.entryID].map { setState(.uploading, for: $0) }
+                if let entry = localByID[record.entryID], entry.isLive { setState(.uploading, for: entry) }
             }
             try? modelContext.save()
 
             do {
                 try await remoteStore.upload(uploads)
                 for record in uploads {
-                    guard let entry = localByID[record.entryID] else { continue }
+                    guard let entry = localByID[record.entryID], entry.isLive else { continue }
                     persist(record.metadata, on: entry)
                     setState(.synced, for: entry)
                     summary.uploadedCount += 1
@@ -199,7 +199,7 @@ struct MetadataSyncCoordinator {
                 }
             } catch {
                 for record in uploads {
-                    guard let entry = localByID[record.entryID] else { continue }
+                    guard let entry = localByID[record.entryID], entry.isLive else { continue }
                     setState(.failed, for: entry, error: error.localizedDescription)
                     summary.failedCount += 1
                 }

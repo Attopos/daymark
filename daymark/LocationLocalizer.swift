@@ -26,7 +26,7 @@ final class LocationLocalizer {
     }
 
     func localize(_ entry: PhotoEntry) async {
-        guard let lat = entry.latitude, let lon = entry.longitude else { return }
+        guard entry.isLive, let lat = entry.latitude, let lon = entry.longitude else { return }
         let key = cacheKey(lat: lat, lon: lon)
         guard cache[key] == nil else { return }
 
@@ -40,6 +40,7 @@ final class LocationLocalizer {
             longitude: lon,
             preferredLocale: .current
         )
+        guard entry.isLive else { return }
         cache[key] = LocalizedLocation(
             city: details.city ?? entry.city,
             countryName: details.countryName ?? entry.countryName
@@ -47,7 +48,7 @@ final class LocationLocalizer {
     }
 
     func localize(_ entries: [PhotoEntry]) async {
-        for entry in entries {
+        for entry in entries where entry.isLive {
             await localize(entry)
         }
     }

@@ -303,3 +303,7 @@ enum SyncStateMachine {
         return priority.first(where: states.contains) ?? .synced
     }
 }
+
+extension PhotoEntry {
+    var isLive: Bool { modelContext != nil && !isDeleted }
+}

@@ -168,7 +168,7 @@ struct ContentView: View {
                     includeOriginals: false
                 )
             } catch {
-                SyncEngineStatusStore.shared.finish(entries: entries, confirmed: false)
+                SyncEngineStatusStore.shared.finish(entries: entries.filter(\.isLive), confirmed: false)
 #if DEBUG
                 print("DAYMARK_SYNC_ENGINE_ERROR \(error.localizedDescription)")
 #endif

@@ -22,6 +22,14 @@ struct PhotoDetailView: View {
     @State private var displayImage: UIImage?
 
     var body: some View {
+        if entry.isLive {
+            detail
+        } else {
+            Color.clear.daymarkScreen()
+        }
+    }
+
+    private var detail: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DaymarkSpacing.m) {
                 photoSection
@@ -317,7 +325,7 @@ struct PhotoDetailView: View {
             longitude: lon,
             preferredLocale: Locale(identifier: "en")
         )
-        guard !Task.isCancelled,
+        guard !Task.isCancelled, entry.isLive,
               entry.latitude == lat, entry.longitude == lon else { return }
 
         var changed = false

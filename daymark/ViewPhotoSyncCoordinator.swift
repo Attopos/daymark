@@ -70,7 +70,7 @@ struct ViewPhotoSyncCoordinator {
         var newUploads: [(PhotoEntry, ViewPhotoUploadRequest)] = []
         var replacementUploads: [(PhotoEntry, ViewPhotoUploadRequest)] = []
 
-        for entry in entries {
+        for entry in entries where entry.isLive {
             let localData = photoStore.viewPhotoData(for: entry)
             let remote = remoteInventory[entry.id]
 
@@ -137,6 +137,7 @@ struct ViewPhotoSyncCoordinator {
 
         do {
             let downloaded = try await remoteStore.download(entryID: entry.id)
+            guard entry.isLive else { return 0 }
             guard Self.hash(downloaded.data) == downloaded.remote.contentHash else {
                 throw ViewPhotoSyncError.downloadHashMismatch
             }
@@ -149,6 +150,7 @@ struct ViewPhotoSyncCoordinator {
             try modelContext.save()
             return Int64(downloaded.data.count)
         } catch {
+            guard entry.isLive else { throw error }
             setState(.failed, for: entry, errorMessage: error.localizedDescription)
             try? modelContext.save()
             throw error
@@ -179,21 +181,22 @@ struct ViewPhotoSyncCoordinator {
         overwrite: Bool,
         summary: inout ViewPhotoSyncSummary
     ) async {
+        let candidates = candidates.filter { $0.entry.isLive }
         guard !candidates.isEmpty else { return }
-        for candidate in candidates {
+        for candidate in candidates where candidate.entry.isLive {
             setState(.pendingUpload, for: candidate.entry)
             setState(.uploading, for: candidate.entry)
         }
 
         do {
             try await remoteStore.upload(candidates.map(\.request), overwrite: overwrite)
-            for candidate in candidates {
+            for candidate in candidates where candidate.entry.isLive {
                 setState(.synced, for: candidate.entry)
                 summary.uploadedCount += 1
                 summary.transferredBytes += candidate.request.byteCount
             }
         } catch {
-            for candidate in candidates {
+            for candidate in candidates where candidate.entry.isLive {
                 setState(.failed, for: candidate.entry, errorMessage: error.localizedDescription)
                 summary.failedCount += 1
             }

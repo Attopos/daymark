@@ -86,7 +86,7 @@ struct ThumbnailPhotoSyncCoordinator {
         var replacementUploads: [(PhotoEntry, ThumbnailPhotoUploadRequest)] = []
         var downloads: [(PhotoEntry, RemoteThumbnailPhoto)] = []
 
-        for entry in entries {
+        for entry in entries where entry.isLive {
             let localData = photoStore.thumbnailData(for: entry)
             let remote = remoteInventory[entry.id]
 
@@ -152,22 +152,23 @@ struct ThumbnailPhotoSyncCoordinator {
         overwrite: Bool,
         summary: inout ThumbnailPhotoSyncSummary
     ) async {
+        let candidates = candidates.filter { $0.entry.isLive }
         guard !candidates.isEmpty else { return }
-        for candidate in candidates {
+        for candidate in candidates where candidate.entry.isLive {
             setState(.pendingUpload, for: candidate.entry)
             setState(.uploading, for: candidate.entry)
         }
 
         do {
             try await remoteStore.upload(candidates.map(\.request), overwrite: overwrite)
-            for candidate in candidates {
+            for candidate in candidates where candidate.entry.isLive {
                 markSynced(candidate.entry)
                 summary.uploadedCount += 1
                 summary.transferredBytes += candidate.request.byteCount
                 summary.uploadedBytes += candidate.request.byteCount
             }
         } catch {
-            for candidate in candidates {
+            for candidate in candidates where candidate.entry.isLive {
                 markFailed(candidate.entry, message: error.localizedDescription)
                 summary.failedCount += 1
             }
@@ -178,8 +179,9 @@ struct ThumbnailPhotoSyncCoordinator {
         _ candidates: [(entry: PhotoEntry, remote: RemoteThumbnailPhoto)],
         summary: inout ThumbnailPhotoSyncSummary
     ) async {
+        let candidates = candidates.filter { $0.entry.isLive }
         guard !candidates.isEmpty else { return }
-        for candidate in candidates {
+        for candidate in candidates where candidate.entry.isLive {
             setState(.pendingDownload, for: candidate.entry)
             setState(.downloading, for: candidate.entry)
         }
@@ -188,7 +190,7 @@ struct ThumbnailPhotoSyncCoordinator {
             let downloadedData = try await remoteStore.download(
                 entryIDs: candidates.map { $0.entry.id }
             )
-            for candidate in candidates {
+            for candidate in candidates where candidate.entry.isLive {
                 guard let data = downloadedData[candidate.entry.id] else {
                     throw ThumbnailPhotoSyncError.missingRemoteAsset
                 }
@@ -206,7 +208,7 @@ struct ThumbnailPhotoSyncCoordinator {
                 summary.downloadedBytes += Int64(data.count)
             }
         } catch {
-            for candidate in candidates {
+            for candidate in candidates where candidate.entry.isLive {
                 markFailed(candidate.entry, message: error.localizedDescription)
                 summary.failedCount += 1
             }

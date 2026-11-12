@@ -204,7 +204,7 @@ struct SyncEngine {
         statusStore.setICloudAvailable(await cloudAccountAvailable())
         await SyncDeletionCoordinator().flush()
 
-        statusStore.setPhase("Checking Metadata", entries: initialEntries)
+        statusStore.setPhase("Checking Metadata", entries: initialEntries.filter(\.isLive))
 
         let metadata = try await metadataCoordinator.sync(
             entries: initialEntries,
@@ -226,7 +226,7 @@ struct SyncEngine {
             downloaded: thumbnails.downloadedBytes
         )
 
-        statusStore.setPhase("Syncing Viewing Photos", entries: entries)
+        statusStore.setPhase("Syncing Viewing Photos", entries: entries.filter(\.isLive))
         let viewing = try await viewPhotoCoordinator.reconcile(
             entries: entries,
             in: modelContext
@@ -234,7 +234,7 @@ struct SyncEngine {
         statusStore.addTransferred(uploaded: viewing.transferredBytes)
 
         if includeOriginals {
-            statusStore.setPhase("Syncing Originals", entries: entries)
+            statusStore.setPhase("Syncing Originals", entries: entries.filter(\.isLive))
             let originals = try await originalCoordinator.syncOriginals(
                 entries: entries,
                 in: modelContext,
@@ -246,13 +246,14 @@ struct SyncEngine {
             )
         }
 
-        let confirmed = entries.allSatisfy { entry in
+        let liveEntries = entries.filter(\.isLive)
+        let confirmed = liveEntries.allSatisfy { entry in
             SyncComponent.allCases.allSatisfy { component in
                 entry.syncState(for: component) != .failed
             }
         }
-        statusStore.finish(entries: entries, confirmed: confirmed)
-        if entries.allSatisfy({ $0.imageData == nil && $0.thumbnailData == nil }) {
+        statusStore.finish(entries: liveEntries, confirmed: confirmed)
+        if liveEntries.allSatisfy({ $0.imageData == nil && $0.thumbnailData == nil }) {
             LegacySyncMigration.recordSuccessfulMigrationCycle()
         }
 #if DEBUG

@@ -95,7 +95,7 @@ struct OriginalPhotoSyncCoordinator {
         let remoteInventory = try await remoteStore.inventory()
         var summary = OriginalPhotoSyncSummary()
 
-        for entry in entries {
+        for entry in entries where entry.isLive {
             let localData = photoStore.originalData(for: entry)
             let remote = remoteInventory[entry.id]
 
@@ -135,11 +135,13 @@ struct OriginalPhotoSyncCoordinator {
                             ),
                             overwrite: true
                         )
+                        guard entry.isLive else { continue }
                         markSynced(entry, contentHash: localHash)
                         summary.uploadedCount += 1
                         summary.transferredBytes += byteCount
                         summary.uploadedBytes += byteCount
                     } catch {
+                        guard entry.isLive else { continue }
                         markFailed(entry, message: error.localizedDescription)
                         summary.failedCount += 1
                     }
@@ -156,6 +158,7 @@ struct OriginalPhotoSyncCoordinator {
                     summary.attemptedBytes += remote.byteCount
                     do {
                         let data = try await remoteStore.download(entryID: entry.id)
+                        guard entry.isLive else { continue }
                         guard Self.hash(data) == remote.contentHash else {
                             throw OriginalPhotoSyncError.downloadHashMismatch
                         }
@@ -165,6 +168,7 @@ struct OriginalPhotoSyncCoordinator {
                         summary.transferredBytes += Int64(data.count)
                         summary.downloadedBytes += Int64(data.count)
                     } catch {
+                        guard entry.isLive else { continue }
                         markFailed(entry, message: error.localizedDescription)
                         summary.failedCount += 1
                     }
@@ -177,6 +181,7 @@ struct OriginalPhotoSyncCoordinator {
                             filename = existing
                         } else {
                             let data = try await remoteStore.download(entryID: entry.id)
+                            guard entry.isLive else { continue }
                             guard Self.hash(data) == remote.contentHash else {
                                 throw OriginalPhotoSyncError.downloadHashMismatch
                             }
@@ -187,6 +192,7 @@ struct OriginalPhotoSyncCoordinator {
                         markConflict(entry, remote: remote, filename: filename)
                         summary.conflictCount += 1
                     } catch {
+                        guard entry.isLive else { continue }
                         markFailed(entry, message: error.localizedDescription)
                         summary.failedCount += 1
                     }
@@ -210,6 +216,7 @@ struct OriginalPhotoSyncCoordinator {
 
                 do {
                     let data = try await remoteStore.download(entryID: entry.id)
+                    guard entry.isLive else { continue }
                     guard Self.hash(data) == remote.contentHash else {
                         throw OriginalPhotoSyncError.downloadHashMismatch
                     }
@@ -219,6 +226,7 @@ struct OriginalPhotoSyncCoordinator {
                     summary.transferredBytes += Int64(data.count)
                     summary.downloadedBytes += Int64(data.count)
                 } catch {
+                    guard entry.isLive else { continue }
                     markFailed(entry, message: error.localizedDescription)
                     summary.failedCount += 1
                 }
@@ -262,12 +270,14 @@ struct OriginalPhotoSyncCoordinator {
                         derivedFromHash: entry.originalCompactedFromHash
                     )
                 )
+                guard entry.isLive else { continue }
                 _ = entry.transitionSyncState(for: .original, to: .synced)
                 entry.originalLastSyncedHash = contentHash
                 summary.uploadedCount += 1
                 summary.transferredBytes += byteCount
                 summary.uploadedBytes += byteCount
             } catch {
+                guard entry.isLive else { continue }
                 markFailed(entry, message: error.localizedDescription)
                 summary.failedCount += 1
             }
