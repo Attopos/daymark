@@ -1,12 +1,1 @@
-# Daymark
-
-iOS journal app (Xcode project `daymark.xcodeproj`, scheme `daymark`). Personal project.
-
-## Rules
-
-- Build and test with `scripts/build.sh` (`test`, `install`, `all`). It targets the paired iPhone, never the simulator, and always shuts down simulators and deletes its build intermediates when it exits.
-- Commits have no `Co-Authored-By` or `Claude-Session` trailers.
-- New branches are named `feature/attopos/<short-description>`, e.g. `feature/attopos/model-team-filter`.
-- No pull requests: once the build and tests pass on the Mac, merge into `main` and push.
-- Never commit `posters/`.
-- Release to the App Store with `scripts/release.sh` (archive, upload, submit for review via the App Store Connect API; `check`, `archive`, `--dry-run` are safe). Versions are 1.x.y: each release bumps y automatically; bump x with `--minor` only when Aaron asks for a big release. Key and issuer ID live in `~/.appstoreconnect/`, never in git.
+@AGENTS.md
